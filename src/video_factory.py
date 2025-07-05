@@ -124,7 +124,8 @@ class VideoFactory:
             content = self.content_generator.generate_content_from_prompt(
                 prompt=prompt,
                 category=category,
-                duration=duration or self.settings["default_duration"]
+                duration=duration or self.settings["default_duration"],
+                language=language
             )
             
             if not content:
@@ -246,7 +247,8 @@ class VideoFactory:
             content = self.content_generator.generate_complete_content(
                 category=category,
                 duration=duration,
-                format_type=self.settings["video_format"]
+                format_type=self.settings["video_format"],
+                language=language
             )
             
             if not content:

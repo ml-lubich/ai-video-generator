@@ -108,7 +108,7 @@ class OllamaContentGenerator:
             logger.error(f"Failed to generate with Ollama: {str(e)}")
             return None
     
-    def generate_topic(self, category: str = None) -> Optional[str]:
+    def generate_topic(self, category: str = None, language: str = "en-US") -> Optional[str]:
         """Generate a trending video topic.
         
         Args:
@@ -121,6 +121,10 @@ class OllamaContentGenerator:
             # Use specific category or pick random one
             selected_category = category or random.choice(self.categories)
             
+            # Language-specific instructions
+            language_name = self._get_language_name(language)
+            language_instruction = f"Generate the topic in {language_name}." if language != "en-US" else ""
+            
             prompt = f"""Generate a trending, engaging video topic about {selected_category} that would be perfect for YouTube or social media. 
 
 Requirements:
@@ -129,6 +133,7 @@ Requirements:
 - Suitable for a 1-3 minute video
 - Educational or entertaining
 - Avoids controversial topics
+- {language_instruction}
 
 Return ONLY the topic title, nothing else.
 
@@ -148,12 +153,13 @@ Topic:"""
             logger.error(f"Topic generation failed: {str(e)}")
             return None
     
-    def generate_script(self, topic: str, duration: int = 60) -> Optional[str]:
+    def generate_script(self, topic: str, duration: int = 60, language: str = "en-US") -> Optional[str]:
         """Generate video script for the given topic.
         
         Args:
             topic: Video topic
             duration: Target duration in seconds
+            language: Target language for script generation
             
         Returns:
             Generated script or None if failed
@@ -161,6 +167,10 @@ Topic:"""
         try:
             # Estimate words per minute (average 150-180 WPM for video)
             target_words = int((duration / 60) * 160)
+            
+            # Language-specific instructions
+            language_name = self._get_language_name(language)
+            language_instruction = f"Write the script in {language_name}." if language != "en-US" else ""
             
             prompt = f"""Write an engaging video script about: {topic}
 
@@ -173,6 +183,7 @@ Requirements:
 - Write in first person as narrator
 - NO stage directions or camera notes
 - Just the spoken narration text
+- {language_instruction}
 
 Script:"""
 
@@ -284,12 +295,35 @@ Requirements:
             "tags": topic.lower().split()[:5]
         }
     
+    def _get_language_name(self, language_code: str) -> str:
+        """Get human-readable language name from language code."""
+        language_map = {
+            "en-US": "English",
+            "ru-RU": "Russian",
+            "es-ES": "Spanish", 
+            "fr-FR": "French",
+            "de-DE": "German",
+            "it-IT": "Italian",
+            "pt-BR": "Portuguese",
+            "zh-CN": "Chinese",
+            "ja-JP": "Japanese",
+            "ko-KR": "Korean",
+            "ar-SA": "Arabic",
+            "hi-IN": "Hindi",
+            "pl-PL": "Polish",
+            "uk-UA": "Ukrainian",
+            "tr-TR": "Turkish",
+            "nl-NL": "Dutch"
+        }
+        return language_map.get(language_code, "English")
+    
     def generate_content_from_prompt(
         self,
         prompt: str,
         category: str = None,
         duration: int = 60,
-        format_type: str = "youtube_short"
+        format_type: str = "youtube_short",
+        language: str = "en-US"
     ) -> Optional[VideoContent]:
         """Generate complete video content based on a custom prompt.
         
@@ -298,6 +332,7 @@ Requirements:
             category: Optional category for context
             duration: Target duration in seconds
             format_type: Video format type
+            language: Target language for content generation
             
         Returns:
             VideoContent object or None if failed
@@ -306,13 +341,13 @@ Requirements:
             logger.info(f"🎬 Generating video content from prompt: {prompt}")
             
             # Step 1: Generate topic from prompt
-            topic = self.generate_topic_from_prompt(prompt, category)
+            topic = self.generate_topic_from_prompt(prompt, category, language)
             if not topic:
                 logger.error("Failed to generate topic from prompt")
                 return None
             
             # Step 2: Generate script
-            script = self.generate_script(topic, duration)
+            script = self.generate_script(topic, duration, language)
             if not script:
                 logger.error("Failed to generate script")
                 return None
@@ -345,12 +380,13 @@ Requirements:
             logger.error(f"Prompt-based content generation failed: {str(e)}")
             return None
     
-    def generate_topic_from_prompt(self, prompt: str, category: str = None) -> Optional[str]:
+    def generate_topic_from_prompt(self, prompt: str, category: str = None, language: str = "en-US") -> Optional[str]:
         """Generate a video topic from a custom prompt.
         
         Args:
             prompt: Custom prompt/idea
             category: Optional category for context
+            language: Target language for content generation
             
         Returns:
             Generated topic or None if failed
@@ -358,6 +394,10 @@ Requirements:
         try:
             # Include category in the context if provided
             context = f" in the {category} category" if category else ""
+            
+            # Language-specific instructions
+            language_name = self._get_language_name(language)
+            language_instruction = f"Generate the topic in {language_name}." if language != "en-US" else ""
             
             prompt_text = f"""Based on this idea or prompt: "{prompt}"
 
@@ -369,6 +409,7 @@ Requirements:
 - Suitable for a video format
 - Current and relevant
 - Educational or entertaining
+- {language_instruction}
 
 Return ONLY the complete topic title, nothing else.
 
@@ -394,7 +435,8 @@ Topic:"""
         self, 
         category: str = None, 
         duration: int = 60,
-        format_type: str = "youtube_short"
+        format_type: str = "youtube_short",
+        language: str = "en-US"
     ) -> Optional[VideoContent]:
         """Generate complete video content package.
         
@@ -410,13 +452,13 @@ Topic:"""
             logger.info(f"🎬 Generating complete video content for {format_type}")
             
             # Step 1: Generate topic
-            topic = self.generate_topic(category)
+            topic = self.generate_topic(category, language)
             if not topic:
                 logger.error("Failed to generate topic")
                 return None
             
             # Step 2: Generate script
-            script = self.generate_script(topic, duration)
+            script = self.generate_script(topic, duration, language)
             if not script:
                 logger.error("Failed to generate script")
                 return None
