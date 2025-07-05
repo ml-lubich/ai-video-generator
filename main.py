@@ -26,13 +26,15 @@ def cli():
 @cli.command()
 @click.option('--pipeline', '-p', required=True, help='Pipeline name to run')
 @click.option('--text', '-t', help='Custom text to override pipeline text')
+@click.option('--language', '-l', help='Language code (e.g., en-US, ru-RU, es-ES, fr-FR)')
 @click.option('--voice', '-v', help='Specific voice to use (e.g., en-US-BrianNeural)')
 @click.option('--randomize-voice', '-r', is_flag=True, help='Use a random voice')
 @click.option('--voice-gender', '-g', type=click.Choice(['male', 'female']), help='Preferred voice gender')
 @click.option('--subtitles', '-s', is_flag=True, help='Add subtitles to the video')
 @click.option('--subtitle-text', help='Custom subtitle text (defaults to spoken text)')
+@click.option('--subtitle-style', type=click.Choice(['professional', 'modern', 'cinematic']), default='professional', help='Subtitle style')
 @click.option('--output', '-o', help='Output filename (without extension)')
-def run_pipeline(pipeline, text, voice, randomize_voice, voice_gender, subtitles, subtitle_text, output):
+def run_pipeline(pipeline, text, language, voice, randomize_voice, voice_gender, subtitles, subtitle_text, subtitle_style, output):
     """Run a video generation pipeline."""
     try:
         # Get pipeline configuration
@@ -49,18 +51,34 @@ def run_pipeline(pipeline, text, voice, randomize_voice, voice_gender, subtitles
         click.echo(f"🎬 Running Pipeline: {pipeline}")
         click.echo(f"📝 Description: {config.description}")
         
+        # Determine language
+        if language:
+            if not Config.validate_language(language):
+                click.echo(f"❌ Language '{language}' not supported")
+                supported = Config.get_supported_languages()
+                click.echo(f"Available languages: {', '.join(f'{code} ({name})' for code, name in supported.items())}")
+                return
+            selected_language = language
+        else:
+            selected_language = Config.DEFAULT_LANGUAGE
+        
+        # Display language info
+        language_name = Config.get_supported_languages().get(selected_language, selected_language)
+        click.echo(f"🌍 Language: {language_name} ({selected_language})")
+        
         # Determine voice
         if voice:
             selected_voice = voice
         elif randomize_voice:
             if voice_gender:
-                selected_voice = Config.get_voice_by_gender(voice_gender)
+                selected_voice = Config.get_voice_by_gender(voice_gender, selected_language)
             else:
-                selected_voice = Config.get_random_voice()
+                selected_voice = Config.get_random_voice(selected_language)
         elif voice_gender:
-            selected_voice = Config.get_voice_by_gender(voice_gender)
+            selected_voice = Config.get_voice_by_gender(voice_gender, selected_language)
         else:
-            selected_voice = config.voice
+            # Use language-specific default voice or fallback to pipeline voice
+            selected_voice = Config.get_default_voice_for_language(selected_language)
         
         click.echo(f"🎤 Voice: {selected_voice}")
         
@@ -77,7 +95,7 @@ def run_pipeline(pipeline, text, voice, randomize_voice, voice_gender, subtitles
         
         # Show subtitle info
         if subtitles:
-            click.echo(f"📄 Subtitles: Enabled")
+            click.echo(f"📄 Subtitles: Enabled ({subtitle_style} style)")
         
         # Set output filename
         if output:
@@ -103,7 +121,8 @@ def run_pipeline(pipeline, text, voice, randomize_voice, voice_gender, subtitles
             num_videos=config.max_videos,
             output_filename=output_filename,
             enable_subtitles=subtitles,
-            subtitle_text=subtitle_text
+            subtitle_text=subtitle_text,
+            subtitle_style=subtitle_style
         )
         
         if result:
@@ -159,38 +178,58 @@ def list_pipelines():
         click.echo(f"❌ Error listing pipelines: {str(e)}")
 
 @cli.command()
-def list_voices():
-    """List all available AI voices."""
+def list_languages():
+    """List all supported languages."""
     try:
-        click.echo(f"🎤 Available AI Voices ({len(Config.AVAILABLE_VOICES)}):")
+        languages = Config.get_supported_languages()
+        click.echo(f"🌍 Supported Languages ({len(languages)}):")
         click.echo("=" * 50)
         click.echo()
         
-        # Group voices by gender
-        male_voices = [v for v in Config.AVAILABLE_VOICES if any(name in v for name in 
-                      ["Brian", "Andrew", "Guy", "Davis", "Jason", "Roger", "Steffan", "Tony", "Ryan"])]
-        female_voices = [v for v in Config.AVAILABLE_VOICES if any(name in v for name in 
-                        ["Aria", "Jenny", "Ava", "Emma", "Michelle", "Nancy", "Amber", "Ashley"])]
+        for code, name in sorted(languages.items()):
+            male_voice = Config.get_default_voice_for_language(code)
+            marker = "⭐" if code == Config.DEFAULT_LANGUAGE else "  "
+            click.echo(f"   {marker} {code} - {name}")
+            click.echo(f"      👨 Default male voice: {male_voice}")
+            click.echo()
         
-        click.echo("👨 Male Voices:")
-        for voice in male_voices:
-            marker = "⭐" if voice == Config.DEFAULT_VOICE else "  "
-            click.echo(f"   {marker} {voice}")
-        
-        click.echo()
-        click.echo("👩 Female Voices:")
-        for voice in female_voices:
-            marker = "⭐" if voice == Config.DEFAULT_VOICE else "  "
-            click.echo(f"   {marker} {voice}")
-        
-        click.echo()
-        click.echo(f"⭐ Default Voice: {Config.DEFAULT_VOICE}")
+        click.echo(f"⭐ Default Language: {Config.DEFAULT_LANGUAGE}")
         click.echo()
         click.echo("💡 Usage:")
+        click.echo("   --language ru-RU")
+        click.echo("   --language es-ES")
+        click.echo("   --language fr-FR")
+        click.echo("   --language de-DE")
+        
+    except Exception as e:
+        click.echo(f"❌ Error listing languages: {str(e)}")
+
+@cli.command()
+def list_voices():
+    """List all available AI voices."""
+    try:
+        click.echo(f"🎤 Available AI Voices by Language:")
+        click.echo("=" * 50)
+        click.echo()
+        
+        # Show voices for each language
+        for lang_code, lang_info in Config.SUPPORTED_LANGUAGES.items():
+            lang_name = lang_info["name"]
+            voices = lang_info["voices"]
+            male_voice = lang_info["male_voice"]
+            
+            click.echo(f"🌍 {lang_name} ({lang_code}):")
+            for voice in voices:
+                marker = "👨" if voice == male_voice else "👩"
+                default_marker = "⭐" if voice == male_voice else "  "
+                click.echo(f"   {default_marker} {marker} {voice}")
+            click.echo()
+        
+        click.echo("💡 Usage:")
         click.echo("   --voice en-US-BrianNeural")
-        click.echo("   --randomize-voice")
-        click.echo("   --voice-gender male")
-        click.echo("   --voice-gender female")
+        click.echo("   --language ru-RU --voice-gender male")
+        click.echo("   --language es-ES --randomize-voice")
+        click.echo("   --language fr-FR --voice-gender female")
         
     except Exception as e:
         click.echo(f"❌ Error listing voices: {str(e)}")
@@ -198,6 +237,7 @@ def list_voices():
 @cli.command()
 @click.option('--text', '-t', required=True, help='Text to convert to speech')
 @click.option('--search', '-s', required=True, help='Search terms for visual assets')
+@click.option('--language', '-l', help='Language code (e.g., en-US, ru-RU, es-ES, fr-FR)')
 @click.option('--voice', '-v', help='Voice to use')
 @click.option('--randomize-voice', '-r', is_flag=True, help='Use random voice')
 @click.option('--voice-gender', '-g', type=click.Choice(['male', 'female']), help='Preferred voice gender')
@@ -206,21 +246,33 @@ def list_voices():
 @click.option('--output', '-o', help='Output filename (without extension)')
 @click.option('--subtitles', is_flag=True, help='Add subtitles')
 @click.option('--subtitle-text', help='Custom subtitle text')
-def create_custom(text, search, voice, randomize_voice, voice_gender, images, videos, output, subtitles, subtitle_text):
+@click.option('--subtitle-style', type=click.Choice(['professional', 'modern', 'cinematic']), default='professional', help='Subtitle style')
+def create_custom(text, search, language, voice, randomize_voice, voice_gender, images, videos, output, subtitles, subtitle_text, subtitle_style):
     """Create a custom video with your own parameters."""
     try:
+        # Determine language
+        if language:
+            if not Config.validate_language(language):
+                click.echo(f"❌ Language '{language}' not supported")
+                supported = Config.get_supported_languages()
+                click.echo(f"Available languages: {', '.join(f'{code} ({name})' for code, name in supported.items())}")
+                return
+            selected_language = language
+        else:
+            selected_language = Config.DEFAULT_LANGUAGE
+        
         # Determine voice
         if voice:
             selected_voice = voice
         elif randomize_voice:
             if voice_gender:
-                selected_voice = Config.get_voice_by_gender(voice_gender)
+                selected_voice = Config.get_voice_by_gender(voice_gender, selected_language)
             else:
-                selected_voice = Config.get_random_voice()
+                selected_voice = Config.get_random_voice(selected_language)
         elif voice_gender:
-            selected_voice = Config.get_voice_by_gender(voice_gender)
+            selected_voice = Config.get_voice_by_gender(voice_gender, selected_language)
         else:
-            selected_voice = Config.DEFAULT_VOICE
+            selected_voice = Config.get_default_voice_for_language(selected_language)
         
         # Set output filename
         if output:
@@ -228,15 +280,19 @@ def create_custom(text, search, voice, randomize_voice, voice_gender, images, vi
         else:
             output_filename = os.path.join(Config.OUTPUT_DIR, "custom_video.mp4")
         
+        # Display language info
+        language_name = Config.get_supported_languages().get(selected_language, selected_language)
+        
         click.echo(f"🎬 Creating Custom Video")
         click.echo(f"📝 Text: {text[:50]}{'...' if len(text) > 50 else ''}")
+        click.echo(f"🌍 Language: {language_name} ({selected_language})")
         click.echo(f"🔍 Search: {search}")
         click.echo(f"🎤 Voice: {selected_voice}")
         click.echo(f"🖼️  Assets: {images} images, {videos} videos")
         click.echo(f"📄 Output: {os.path.basename(output_filename)}")
         
         if subtitles:
-            click.echo(f"📄 Subtitles: Enabled")
+            click.echo(f"📄 Subtitles: Enabled ({subtitle_style} style)")
         
         click.echo()
         click.echo("🚀 Starting video creation...")
@@ -251,7 +307,8 @@ def create_custom(text, search, voice, randomize_voice, voice_gender, images, vi
             num_videos=videos,
             output_filename=output_filename,
             enable_subtitles=subtitles,
-            subtitle_text=subtitle_text
+            subtitle_text=subtitle_text,
+            subtitle_style=subtitle_style
         )
         
         if result:

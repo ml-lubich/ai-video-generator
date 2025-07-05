@@ -34,13 +34,14 @@ class VideoAssembler:
         # Ensure directories exist
         Config.ensure_directories()
     
-    def add_subtitles(self, video_clip, text: str, enable_subtitles: bool = True):
-        """Add subtitles to a video clip.
+    def add_subtitles(self, video_clip, text: str, enable_subtitles: bool = True, subtitle_style: str = "professional"):
+        """Add stylized subtitles to a video clip.
         
         Args:
             video_clip: The video clip to add subtitles to
             text: The text to display as subtitles
             enable_subtitles: Whether to enable subtitles
+            subtitle_style: Style of subtitles ('professional', 'modern', 'cinematic')
             
         Returns:
             Video clip with subtitles added
@@ -49,25 +50,63 @@ class VideoAssembler:
             return video_clip
             
         try:
-            # Create subtitle text clip
-            subtitle_clip = TextClip(
-                text=text,
-                font=Config.SUBTITLE_FONT_FAMILY,
-                fontsize=Config.SUBTITLE_FONT_SIZE,
-                color=Config.SUBTITLE_FONT_COLOR,
-                stroke_color='black',
-                stroke_width=2,
-                method='caption',
-                size=self.resolution
-            )
+            # Get style configuration
+            style_config = Config.SUBTITLE_STYLES.get(subtitle_style, Config.SUBTITLE_STYLES["professional"])
             
-            # Position subtitles
+            logger.info(f"Adding subtitles with {subtitle_style} style")
+            
+            # Create subtitle text clip with correct MoviePy 2.1.2 parameters
+            try:
+                # Use correct MoviePy 2.1.2 API
+                subtitle_clip = TextClip(
+                    text=text,
+                    font_size=style_config["font_size"],
+                    color=style_config["color"],
+                    stroke_color=style_config["stroke_color"],
+                    stroke_width=style_config["stroke_width"],
+                    method='caption',
+                    size=self.resolution
+                )
+            except Exception as e:
+                logger.warning(f"Failed with advanced styling, using basic: {e}")
+                # Fallback to basic subtitle without stroke
+                subtitle_clip = TextClip(
+                    text=text,
+                    font_size=style_config["font_size"],
+                    color=style_config["color"],
+                    method='caption',
+                    size=self.resolution
+                )
+            
+            # Position subtitles with better styling
             subtitle_clip = subtitle_clip.set_position(('center', 'bottom')).set_margin(Config.SUBTITLE_MARGIN)
             subtitle_clip = subtitle_clip.set_duration(video_clip.duration)
             
-            # Composite video with subtitles
-            final_video = CompositeVideoClip([video_clip, subtitle_clip])
+            # Add shadow effect (simulated with multiple text layers)
+            shadow_offset = style_config["shadow_offset"]
+            if shadow_offset != (0, 0):
+                # Create shadow clip with correct parameters
+                shadow_clip = TextClip(
+                    text=text,
+                    font_size=style_config["font_size"],
+                    color='black',  # Shadow color
+                    method='caption',
+                    size=self.resolution
+                )
+                
+                # Position shadow with offset
+                shadow_x = 'center' if shadow_offset[0] == 0 else f'center+{shadow_offset[0]}'
+                shadow_y = f'bottom+{shadow_offset[1]}'
+                shadow_clip = shadow_clip.set_position((shadow_x, shadow_y)).set_margin(Config.SUBTITLE_MARGIN)
+                shadow_clip = shadow_clip.set_duration(video_clip.duration)
+                
+                # Composite video with shadow and subtitles
+                final_video = CompositeVideoClip([video_clip, shadow_clip, subtitle_clip])
+            else:
+                # Composite video with subtitles only
+                final_video = CompositeVideoClip([video_clip, subtitle_clip])
             
+            logger.info(f"Successfully added {subtitle_style} subtitles")
             return final_video
             
         except Exception as e:
@@ -82,7 +121,8 @@ class VideoAssembler:
         output_path: str = None,
         image_duration: float = None,
         subtitle_text: str = None,
-        enable_subtitles: bool = False
+        enable_subtitles: bool = False,
+        subtitle_style: str = "professional"
     ) -> Optional[str]:
         """Create video from mixed assets.
         
@@ -176,7 +216,7 @@ class VideoAssembler:
             # Add subtitles if requested
             if enable_subtitles and subtitle_text:
                 logger.info("Adding subtitles to video")
-                final_video = self.add_subtitles(final_video, subtitle_text, enable_subtitles)
+                final_video = self.add_subtitles(final_video, subtitle_text, enable_subtitles, subtitle_style)
             
             # Generate output path if not provided
             if output_path is None:
@@ -216,7 +256,8 @@ class VideoAssembler:
         image_duration: float = None,
         transition_duration: float = 0.5,
         subtitle_text: str = None,
-        enable_subtitles: bool = False
+        enable_subtitles: bool = False,
+        subtitle_style: str = "professional"
     ) -> Optional[str]:
         """Create a slideshow video from images.
         
@@ -305,7 +346,7 @@ class VideoAssembler:
             # Add subtitles if requested
             if enable_subtitles and subtitle_text:
                 logger.info("Adding subtitles to slideshow")
-                final_video = self.add_subtitles(final_video, subtitle_text, enable_subtitles)
+                final_video = self.add_subtitles(final_video, subtitle_text, enable_subtitles, subtitle_style)
             
             # Generate output path if not provided
             if output_path is None:

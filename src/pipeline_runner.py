@@ -44,7 +44,8 @@ class PipelineRunner:
         num_videos: int = 1,
         output_filename: str = None,
         enable_subtitles: bool = False,
-        subtitle_text: str = None
+        subtitle_text: str = None,
+        subtitle_style: str = "professional"
     ) -> Optional[str]:
         """Run the complete video generation pipeline.
         
@@ -113,7 +114,8 @@ class PipelineRunner:
                     audio_path=audio_path,
                     output_path=output_filename,
                     subtitle_text=final_subtitle_text,
-                    enable_subtitles=enable_subtitles
+                    enable_subtitles=enable_subtitles,
+                    subtitle_style=subtitle_style
                 )
             else:
                 logger.warning("No assets downloaded, creating audio-only video")
@@ -122,7 +124,8 @@ class PipelineRunner:
                     audio_path=audio_path,
                     output_path=output_filename,
                     subtitle_text=final_subtitle_text,
-                    enable_subtitles=enable_subtitles
+                    enable_subtitles=enable_subtitles,
+                    subtitle_style=subtitle_style
                 )
             
             if not video_path:
@@ -155,8 +158,12 @@ class PipelineRunner:
             Selected voice name
         """
         if voice:
-            # Use specific voice if provided
-            if voice in Config.AVAILABLE_VOICES:
+            # Use specific voice if provided - check across all supported languages
+            all_voices = []
+            for lang_info in Config.SUPPORTED_LANGUAGES.values():
+                all_voices.extend(lang_info["voices"])
+            
+            if voice in all_voices:
                 return voice
             else:
                 logger.warning(f"Voice '{voice}' not found, using default")
@@ -181,7 +188,8 @@ class PipelineRunner:
         audio_path: str,
         output_path: str = None,
         subtitle_text: str = None,
-        enable_subtitles: bool = False
+        enable_subtitles: bool = False,
+        subtitle_style: str = "professional"
     ) -> Optional[str]:
         """Create a simple audio-only video with optional subtitles.
         
@@ -223,7 +231,7 @@ class PipelineRunner:
             # Add subtitles if requested
             if enable_subtitles and subtitle_text:
                 logger.info("Adding subtitles to audio-only video")
-                background = self.video_assembler.add_subtitles(background, subtitle_text, enable_subtitles)
+                background = self.video_assembler.add_subtitles(background, subtitle_text, enable_subtitles, subtitle_style)
             
             # Generate output path
             if output_path is None:
