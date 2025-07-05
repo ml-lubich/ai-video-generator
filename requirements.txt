@@ -4,4 +4,12 @@ moviepy>=1.0.3
 requests>=2.31.0
 python-dotenv>=1.0.0
 click>=8.1.0
-Pillow>=9.0.0 
+Pillow>=9.0.0
+
+# AI Video Factory Dependencies
+openai-whisper>=20250625
+google-auth>=2.34.0
+google-auth-oauthlib>=1.2.0
+google-api-python-client>=2.149.0
+pysrt>=1.1.2
+ffmpeg-python>=0.2.0

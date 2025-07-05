@@ -1,384 +1,479 @@
 #!/usr/bin/env python3
 """
-Main CLI interface for the AI video generator.
-Provides command-line interface for running pipelines and generating videos.
+Unified Video Generator - Single entry point for all video creation.
+Creates videos with custom text OR AI-generated content.
 """
 import click
 import os
 import sys
-from typing import Optional
+import time
+from typing import Optional, Dict, Any
 
-# Add the src directory to the Python path
-src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
-sys.path.insert(0, src_path)
+# Add src to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-# Now import from the src directory
-from pipeline_config import get_pipeline_manager
+from video_factory import VideoFactory
+from content_generator import OllamaContentGenerator
 from pipeline_runner import PipelineRunner
 from config import Config
 
-@click.group()
-@click.version_option(version="1.0.0")
-def cli():
-    """AI Video Generator - Create professional videos with AI voices and real stock footage."""
-    pass
+# Configure logging
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-@cli.command()
-@click.option('--pipeline', '-p', required=True, help='Pipeline name to run')
-@click.option('--text', '-t', help='Custom text to override pipeline text')
-@click.option('--language', '-l', help='Language code (e.g., en-US, ru-RU, es-ES, fr-FR)')
-@click.option('--voice', '-v', help='Specific voice to use (e.g., en-US-BrianNeural)')
-@click.option('--randomize-voice', '-r', is_flag=True, help='Use a random voice')
-@click.option('--voice-gender', '-g', type=click.Choice(['male', 'female']), help='Preferred voice gender')
-@click.option('--subtitles', '-s', is_flag=True, help='Add subtitles to the video')
-@click.option('--subtitle-text', help='Custom subtitle text (defaults to spoken text)')
+
+@click.command()
+@click.option('--text', type=str, help='Custom text for video (if not provided, AI will generate content)')
+@click.option('--category', type=str, help='Content category (optional, used for AI generation or asset search)')
+@click.option('--length', type=int, default=60, help='Average video length in seconds (guides AI, not hard limit)')
+@click.option('--language', type=str, default='en-US', help='Video language (default: en-US)')
+@click.option('--voice-gender', type=click.Choice(['male', 'female', 'random']), default='male', help='Voice gender preference')
+@click.option('--output', type=str, help='Output filename (without extension)')
+@click.option('--subtitles/--no-subtitles', default=True, help='Enable subtitles')
 @click.option('--subtitle-style', type=click.Choice(['professional', 'modern', 'cinematic']), default='professional', help='Subtitle style')
-@click.option('--output', '-o', help='Output filename (without extension)')
-def run_pipeline(pipeline, text, language, voice, randomize_voice, voice_gender, subtitles, subtitle_text, subtitle_style, output):
-    """Run a video generation pipeline."""
+@click.option('--upload/--no-upload', default=False, help='Upload to YouTube')
+@click.option('--images', type=int, default=4, help='Number of images to include')
+@click.option('--videos', type=int, default=2, help='Number of video clips to include')
+@click.option('--ai-model', type=str, default='llama3.2', help='AI model for content generation')
+@click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging')
+def generate_video(
+    text: Optional[str],
+    category: Optional[str],
+    length: int,
+    language: str,
+    voice_gender: str,
+    output: Optional[str],
+    subtitles: bool,
+    subtitle_style: str,
+    upload: bool,
+    images: int,
+    videos: int,
+    ai_model: str,
+    verbose: bool
+):
+    """
+    🎬 Unified Video Generator
+    
+    Create videos with custom text OR AI-generated content.
+    
+    Examples:
+    
+    # Custom text video
+    python main.py --text "Hello world!" --category technology
+    
+    # AI-generated video
+    python main.py --category science --length 120
+    
+    # Multi-language video
+    python main.py --text "Bonjour!" --language fr-FR --voice-gender male
+    """
+    
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
     try:
-        # Get pipeline configuration
-        manager = get_pipeline_manager()
-        config = manager.get_pipeline(pipeline)
+        # Initialize the video creation system
+        creator = UnifiedVideoCreator(ai_model=ai_model)
         
-        if not config:
-            click.echo(f"❌ Pipeline '{pipeline}' not found")
-            available = manager.list_pipelines()
-            click.echo(f"Available pipelines: {', '.join(available)}")
-            return
-        
-        # Display pipeline info
-        click.echo(f"🎬 Running Pipeline: {pipeline}")
-        click.echo(f"📝 Description: {config.description}")
-        
-        # Determine language
-        if language:
-            if not Config.validate_language(language):
-                click.echo(f"❌ Language '{language}' not supported")
-                supported = Config.get_supported_languages()
-                click.echo(f"Available languages: {', '.join(f'{code} ({name})' for code, name in supported.items())}")
-                return
-            selected_language = language
-        else:
-            selected_language = Config.DEFAULT_LANGUAGE
-        
-        # Display language info
-        language_name = Config.get_supported_languages().get(selected_language, selected_language)
-        click.echo(f"🌍 Language: {language_name} ({selected_language})")
-        
-        # Determine voice
-        if voice:
-            selected_voice = voice
-        elif randomize_voice:
-            if voice_gender:
-                selected_voice = Config.get_voice_by_gender(voice_gender, selected_language)
-            else:
-                selected_voice = Config.get_random_voice(selected_language)
-        elif voice_gender:
-            selected_voice = Config.get_voice_by_gender(voice_gender, selected_language)
-        else:
-            # Use language-specific default voice or fallback to pipeline voice
-            selected_voice = Config.get_default_voice_for_language(selected_language)
-        
-        click.echo(f"🎤 Voice: {selected_voice}")
-        
-        # Set text
-        final_text = text if text else config.text
-        
-        # Show asset info
-        click.echo(f"🔍 Search: {config.search_query}")
-        click.echo(f"🖼️  Assets: {config.max_images} images, {config.max_videos} videos")
-        
-        # Calculate estimated duration
-        estimated_duration = (config.max_images * config.image_duration) + (config.max_videos * 3)
-        click.echo(f"⏱️  Estimated Duration: ~{estimated_duration:.1f}s")
-        
-        # Show subtitle info
-        if subtitles:
-            click.echo(f"📄 Subtitles: Enabled ({subtitle_style} style)")
-        
-        # Set output filename
-        if output:
-            output_filename = os.path.join(Config.OUTPUT_DIR, f"{output}.mp4")
-        else:
-            output_filename = os.path.join(Config.OUTPUT_DIR, config.output_filename)
-        
-        click.echo(f"📄 Output: {os.path.basename(output_filename)}")
-        
+        # Determine creation mode
         if text:
-            click.echo(f"📄 Custom Text: {text[:50]}{'...' if len(text) > 50 else ''}")
+            click.echo(f"🎬 Creating video with custom text...")
+            mode = "custom"
+        else:
+            click.echo(f"🤖 Creating AI-generated video...")
+            mode = "ai"
+            
+            # Check if AI system is available
+            if not creator.check_ai_system():
+                click.echo("❌ AI system not available. Please provide --text for custom video.")
+                return
         
-        click.echo()
-        click.echo("🚀 Starting pipeline execution...")
+        # Display configuration
+        click.echo(f"📝 Mode: {mode}")
+        click.echo(f"📂 Category: {category or 'auto-detect/random'}")
+        click.echo(f"⏱️  Target length: {length}s")
+        click.echo(f"🌍 Language: {language}")
+        click.echo(f"🎤 Voice: {voice_gender}")
+        click.echo(f"📄 Subtitles: {'✅' if subtitles else '❌'} ({subtitle_style})")
+        click.echo(f"📺 Upload: {'✅' if upload else '❌'}")
         
-        # Initialize and run pipeline
-        runner = PipelineRunner()
-        result = runner.run_pipeline(
-            text=final_text,
-            search_terms=config.search_query,
-            voice=selected_voice,
-            num_images=config.max_images,
-            num_videos=config.max_videos,
-            output_filename=output_filename,
-            enable_subtitles=subtitles,
-            subtitle_text=subtitle_text,
-            subtitle_style=subtitle_style
+        # Create the video
+        result = creator.create_video(
+            text=text,
+            category=category,
+            length=length,
+            language=language,
+            voice_gender=voice_gender,
+            output=output,
+            subtitles=subtitles,
+            subtitle_style=subtitle_style,
+            upload=upload,
+            images=images,
+            videos=videos
         )
         
-        if result:
-            file_size = os.path.getsize(result)
-            click.echo("🎉 Pipeline completed successfully!")
-            click.echo(f"📹 Generated video: {os.path.basename(result)}")
-            click.echo(f"📊 File size: {file_size:,} bytes ({file_size/1024/1024:.1f} MB)")
+        # Display results
+        if result and result.get('success'):
+            click.echo(f"\n🎉 Video created successfully!")
+            click.echo(f"📹 Path: {result['video_path']}")
+            click.echo(f"📊 Size: {result['file_size']:,} bytes")
+            click.echo(f"⏱️  Time: {result['processing_time']:.1f}s")
+            
+            if result.get('youtube_url'):
+                click.echo(f"🔗 YouTube: {result['youtube_url']}")
+            
+            if result.get('ai_content'):
+                click.echo(f"🤖 AI Title: {result['ai_content'].get('title', 'N/A')}")
         else:
-            click.echo("❌ Pipeline execution failed")
-            click.echo("❌ Error running pipeline")
+            click.echo("❌ Video creation failed. Check logs for details.")
+            sys.exit(1)
             
     except KeyboardInterrupt:
-        click.echo("\n⏸️  Pipeline interrupted by user")
+        click.echo("\n🛑 Video creation cancelled by user.")
+        sys.exit(0)
     except Exception as e:
-        click.echo(f"❌ Pipeline execution failed")
-        click.echo(f"❌ Error running pipeline: {str(e)}")
+        click.echo(f"❌ Error: {str(e)}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+
+class UnifiedVideoCreator:
+    """Unified video creation system that handles both custom and AI content."""
+    
+    def __init__(self, ai_model: str = "llama3.2"):
+        """Initialize the unified video creator."""
+        self.ai_model = ai_model
+        self.video_factory = None
+        self.pipeline_runner = PipelineRunner()
+        
+        # Initialize AI factory only if needed
+        self._ai_ready = None
+    
+    def check_ai_system(self) -> bool:
+        """Check if AI system is available and ready."""
+        if self._ai_ready is not None:
+            return self._ai_ready
+        
+        try:
+            if not self.video_factory:
+                self.video_factory = VideoFactory(model=self.ai_model)
+            
+            # Test AI connection
+            self._ai_ready = self.video_factory.content_generator.test_connection()
+            return self._ai_ready
+        except Exception as e:
+            logger.warning(f"AI system check failed: {str(e)}")
+            self._ai_ready = False
+            return False
+    
+    def create_video(
+        self,
+        text: Optional[str] = None,
+        category: Optional[str] = None,
+        length: int = 60,
+        language: str = 'en-US',
+        voice_gender: str = 'male',
+        output: Optional[str] = None,
+        subtitles: bool = True,
+        subtitle_style: str = 'professional',
+        upload: bool = False,
+        images: int = 4,
+        videos: int = 2
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Create video with either custom text or AI-generated content.
+        
+        Args:
+            text: Custom text (if None, AI generates content)
+            category: Content category (optional)
+            length: Target video length in seconds
+            language: Video language
+            voice_gender: Voice gender preference
+            output: Output filename
+            subtitles: Enable subtitles
+            subtitle_style: Subtitle style
+            upload: Upload to YouTube
+            images: Number of images
+            videos: Number of video clips
+            
+        Returns:
+            Result dictionary with success status and details
+        """
+        start_time = time.time()
+        
+        try:
+            # Determine content source
+            if text:
+                # Custom text mode
+                result = self._create_custom_video(
+                    text=text,
+                    category=category,
+                    language=language,
+                    voice_gender=voice_gender,
+                    output=output,
+                    subtitles=subtitles,
+                    subtitle_style=subtitle_style,
+                    upload=upload,
+                    images=images,
+                    videos=videos
+                )
+            else:
+                # AI-generated mode
+                result = self._create_ai_video(
+                    category=category,
+                    length=length,
+                    language=language,
+                    voice_gender=voice_gender,
+                    output=output,
+                    subtitles=subtitles,
+                    subtitle_style=subtitle_style,
+                    upload=upload,
+                    images=images,
+                    videos=videos
+                )
+            
+            # Add processing time
+            if result:
+                result['processing_time'] = time.time() - start_time
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Video creation failed: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'processing_time': time.time() - start_time
+            }
+    
+    def _create_custom_video(
+        self,
+        text: str,
+        category: Optional[str],
+        language: str,
+        voice_gender: str,
+        output: Optional[str],
+        subtitles: bool,
+        subtitle_style: str,
+        upload: bool,
+        images: int,
+        videos: int
+    ) -> Dict[str, Any]:
+        """Create video with custom text."""
+        logger.info("Creating video with custom text")
+        
+        # Generate search terms from text and category
+        search_terms = self._generate_search_terms(text, category)
+        
+        # Generate output filename if not provided
+        if not output:
+            output = f"custom_video_{int(time.time())}"
+        
+        # Use pipeline runner for custom video
+        video_path = self.pipeline_runner.run_pipeline(
+            text=text,
+            search_terms=search_terms,
+            voice=Config.get_voice_by_gender(voice_gender, language),
+            output_filename=f"output/{output}.mp4",
+            enable_subtitles=subtitles,
+            subtitle_style=subtitle_style,
+            num_images=images,
+            num_videos=videos
+        )
+        
+        if not video_path:
+            return {'success': False, 'error': 'Pipeline execution failed'}
+        
+        # Handle YouTube upload if requested
+        video_id = None
+        youtube_url = None
+        if upload:
+            video_id, youtube_url = self._handle_youtube_upload(
+                video_path=video_path,
+                title=f"Custom Video - {text[:50]}...",
+                description=f"Custom video created with text: {text[:200]}...",
+                tags=search_terms.split() if search_terms else ['custom', 'video']
+            )
+        
+        return {
+            'success': True,
+            'video_path': video_path,
+            'file_size': os.path.getsize(video_path) if os.path.exists(video_path) else 0,
+            'video_id': video_id,
+            'youtube_url': youtube_url,
+            'content_type': 'custom',
+            'search_terms': search_terms
+        }
+    
+    def _create_ai_video(
+        self,
+        category: Optional[str],
+        length: int,
+        language: str,
+        voice_gender: str,
+        output: Optional[str],
+        subtitles: bool,
+        subtitle_style: str,
+        upload: bool,
+        images: int,
+        videos: int
+    ) -> Dict[str, Any]:
+        """Create video with AI-generated content."""
+        logger.info("Creating video with AI-generated content")
+        
+        if not self.video_factory:
+            self.video_factory = VideoFactory(model=self.ai_model)
+        
+        # Generate AI content
+        result = self.video_factory.generate_single_video(
+            category=category,
+            duration=length,
+            upload=upload,
+            language=language,
+            voice_gender=voice_gender
+        )
+        
+        if not result or not result.get('success'):
+            return {'success': False, 'error': 'AI video generation failed'}
+        
+        return {
+            'success': True,
+            'video_path': result['video_path'],
+            'file_size': result['file_size'],
+            'video_id': result.get('video_id'),
+            'youtube_url': result.get('youtube_url'),
+            'content_type': 'ai',
+            'ai_content': result.get('content')
+        }
+    
+    def _generate_search_terms(self, text: str, category: Optional[str]) -> str:
+        """Generate search terms for custom text."""
+        # Simple keyword extraction for search terms
+        words = text.lower().split()
+        
+        # Filter out common words
+        stop_words = {'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those'}
+        keywords = [word for word in words if word not in stop_words and len(word) > 2]
+        
+        # Take top 5 keywords
+        search_terms = ' '.join(keywords[:5])
+        
+        # Add category if provided
+        if category:
+            search_terms = f"{category} {search_terms}"
+        
+        return search_terms or "generic video content"
+    
+    def _handle_youtube_upload(self, video_path: str, title: str, description: str, tags: list) -> tuple:
+        """Handle YouTube upload if configured."""
+        try:
+            from youtube_uploader import YouTubeUploader
+            
+            uploader = YouTubeUploader()
+            if uploader.setup_authentication() and uploader.test_connection():
+                video_id = uploader.upload_video(
+                    video_path=video_path,
+                    title=title,
+                    description=description,
+                    tags=tags,
+                    privacy_status="public"
+                )
+                
+                if video_id:
+                    youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+                    return video_id, youtube_url
+            
+            logger.warning("YouTube upload failed or not configured")
+            return None, None
+            
+        except Exception as e:
+            logger.error(f"YouTube upload error: {str(e)}")
+            return None, None
+
+
+# Additional utility commands
+@click.group()
+def cli():
+    """🎬 Video Generator - Unified video creation system"""
+    pass
+
 
 @cli.command()
-def list_pipelines():
-    """List all available video generation pipelines."""
+@click.option('--ai-model', default='llama3.2', help='AI model to test')
+def test_systems(ai_model: str):
+    """Test all video generation systems."""
+    click.echo("🧪 Testing video generation systems...")
+    
+    creator = UnifiedVideoCreator(ai_model=ai_model)
+    
+    # Test basic pipeline
+    click.echo("📹 Testing video pipeline...")
     try:
-        manager = get_pipeline_manager()
-        pipelines = manager.get_all_pipelines()
+        # Test with minimal setup
+        result = creator.create_video(
+            text="This is a test video.",
+            category="test",
+            length=10,
+            subtitles=False,
+            upload=False
+        )
         
-        click.echo(f"🎬 Available Video Generation Pipelines ({len(pipelines)}):")
-        click.echo("=" * 60)
-        click.echo()
-        
-        for name, config in pipelines.items():
-            click.echo(f"📽️  {name}")
-            # Truncate long descriptions
-            description = config.description
-            if len(description) > 80:
-                description = description[:77] + "..."
-            click.echo(f"   📝 {description}")
-            click.echo(f"   🔍 Search: {config.search_query}")
-            click.echo(f"   🎤 Voice: {config.voice}")
-            click.echo(f"   🖼️  Assets: {config.max_images} images, {config.max_videos} videos")
+        if result and result.get('success'):
+            click.echo("✅ Video pipeline working")
+            if os.path.exists(result['video_path']):
+                click.echo(f"📁 Test video: {result['video_path']}")
+        else:
+            click.echo("❌ Video pipeline failed")
             
-            # Calculate estimated duration
-            estimated_duration = (config.max_images * config.image_duration) + (config.max_videos * 3)
-            click.echo(f"   ⏱️  Duration: ~{estimated_duration:.1f}s")
-            click.echo(f"   📄 Output: {config.output_filename}")
-            click.echo()
-        
-        click.echo("💡 Usage:")
-        click.echo("   python main.py run-pipeline --pipeline <name>")
-        click.echo("   python main.py run-pipeline --pipeline <name> --text \"Your custom text\"")
-        click.echo("   python main.py run-pipeline --pipeline <name> --randomize-voice")
-        click.echo("   python main.py run-pipeline --pipeline <name> --subtitles")
-        
     except Exception as e:
-        click.echo(f"❌ Error listing pipelines: {str(e)}")
+        click.echo(f"❌ Pipeline test failed: {str(e)}")
+    
+    # Test AI system
+    click.echo("🤖 Testing AI system...")
+    if creator.check_ai_system():
+        click.echo("✅ AI system ready")
+    else:
+        click.echo("⚠️  AI system not available (install Ollama)")
+    
+    click.echo("🎉 System test complete!")
+
 
 @cli.command()
 def list_languages():
-    """List all supported languages."""
-    try:
-        languages = Config.get_supported_languages()
-        click.echo(f"🌍 Supported Languages ({len(languages)}):")
-        click.echo("=" * 50)
-        click.echo()
-        
-        for code, name in sorted(languages.items()):
-            male_voice = Config.get_default_voice_for_language(code)
-            marker = "⭐" if code == Config.DEFAULT_LANGUAGE else "  "
-            click.echo(f"   {marker} {code} - {name}")
-            click.echo(f"      👨 Default male voice: {male_voice}")
-            click.echo()
-        
-        click.echo(f"⭐ Default Language: {Config.DEFAULT_LANGUAGE}")
-        click.echo()
-        click.echo("💡 Usage:")
-        click.echo("   --language ru-RU")
-        click.echo("   --language es-ES")
-        click.echo("   --language fr-FR")
-        click.echo("   --language de-DE")
-        
-    except Exception as e:
-        click.echo(f"❌ Error listing languages: {str(e)}")
+    """List supported languages."""
+    from config import Config
+    
+    click.echo("🌍 Supported Languages:")
+    for code, info in Config.SUPPORTED_LANGUAGES.items():
+        default_voice = info.get('male_voice', info.get('default_voice', 'Unknown'))
+        click.echo(f"  {code}: {info['name']} (default: {default_voice})")
 
-@cli.command()
-def list_voices():
-    """List all available AI voices."""
-    try:
-        click.echo(f"🎤 Available AI Voices by Language:")
-        click.echo("=" * 50)
-        click.echo()
-        
-        # Show voices for each language
-        for lang_code, lang_info in Config.SUPPORTED_LANGUAGES.items():
-            lang_name = lang_info["name"]
-            voices = lang_info["voices"]
-            male_voice = lang_info["male_voice"]
-            
-            click.echo(f"🌍 {lang_name} ({lang_code}):")
-            for voice in voices:
-                marker = "👨" if voice == male_voice else "👩"
-                default_marker = "⭐" if voice == male_voice else "  "
-                click.echo(f"   {default_marker} {marker} {voice}")
-            click.echo()
-        
-        click.echo("💡 Usage:")
-        click.echo("   --voice en-US-BrianNeural")
-        click.echo("   --language ru-RU --voice-gender male")
-        click.echo("   --language es-ES --randomize-voice")
-        click.echo("   --language fr-FR --voice-gender female")
-        
-    except Exception as e:
-        click.echo(f"❌ Error listing voices: {str(e)}")
 
-@cli.command()
-@click.option('--text', '-t', required=True, help='Text to convert to speech')
-@click.option('--search', '-s', required=True, help='Search terms for visual assets')
-@click.option('--language', '-l', help='Language code (e.g., en-US, ru-RU, es-ES, fr-FR)')
-@click.option('--voice', '-v', help='Voice to use')
-@click.option('--randomize-voice', '-r', is_flag=True, help='Use random voice')
-@click.option('--voice-gender', '-g', type=click.Choice(['male', 'female']), help='Preferred voice gender')
-@click.option('--images', '-i', default=3, help='Number of images to fetch')
-@click.option('--videos', '-V', default=1, help='Number of videos to fetch')
-@click.option('--output', '-o', help='Output filename (without extension)')
-@click.option('--subtitles', is_flag=True, help='Add subtitles')
-@click.option('--subtitle-text', help='Custom subtitle text')
-@click.option('--subtitle-style', type=click.Choice(['professional', 'modern', 'cinematic']), default='professional', help='Subtitle style')
-def create_custom(text, search, language, voice, randomize_voice, voice_gender, images, videos, output, subtitles, subtitle_text, subtitle_style):
-    """Create a custom video with your own parameters."""
-    try:
-        # Determine language
-        if language:
-            if not Config.validate_language(language):
-                click.echo(f"❌ Language '{language}' not supported")
-                supported = Config.get_supported_languages()
-                click.echo(f"Available languages: {', '.join(f'{code} ({name})' for code, name in supported.items())}")
-                return
-            selected_language = language
-        else:
-            selected_language = Config.DEFAULT_LANGUAGE
-        
-        # Determine voice
-        if voice:
-            selected_voice = voice
-        elif randomize_voice:
-            if voice_gender:
-                selected_voice = Config.get_voice_by_gender(voice_gender, selected_language)
-            else:
-                selected_voice = Config.get_random_voice(selected_language)
-        elif voice_gender:
-            selected_voice = Config.get_voice_by_gender(voice_gender, selected_language)
-        else:
-            selected_voice = Config.get_default_voice_for_language(selected_language)
-        
-        # Set output filename
-        if output:
-            output_filename = os.path.join(Config.OUTPUT_DIR, f"{output}.mp4")
-        else:
-            output_filename = os.path.join(Config.OUTPUT_DIR, "custom_video.mp4")
-        
-        # Display language info
-        language_name = Config.get_supported_languages().get(selected_language, selected_language)
-        
-        click.echo(f"🎬 Creating Custom Video")
-        click.echo(f"📝 Text: {text[:50]}{'...' if len(text) > 50 else ''}")
-        click.echo(f"🌍 Language: {language_name} ({selected_language})")
-        click.echo(f"🔍 Search: {search}")
-        click.echo(f"🎤 Voice: {selected_voice}")
-        click.echo(f"🖼️  Assets: {images} images, {videos} videos")
-        click.echo(f"📄 Output: {os.path.basename(output_filename)}")
-        
-        if subtitles:
-            click.echo(f"📄 Subtitles: Enabled ({subtitle_style} style)")
-        
-        click.echo()
-        click.echo("🚀 Starting video creation...")
-        
-        # Initialize and run pipeline
-        runner = PipelineRunner()
-        result = runner.run_pipeline(
-            text=text,
-            search_terms=search,
-            voice=selected_voice,
-            num_images=images,
-            num_videos=videos,
-            output_filename=output_filename,
-            enable_subtitles=subtitles,
-            subtitle_text=subtitle_text,
-            subtitle_style=subtitle_style
-        )
-        
-        if result:
-            file_size = os.path.getsize(result)
-            click.echo("🎉 Video creation completed successfully!")
-            click.echo(f"📹 Generated video: {os.path.basename(result)}")
-            click.echo(f"📊 File size: {file_size:,} bytes ({file_size/1024/1024:.1f} MB)")
-        else:
-            click.echo("❌ Video creation failed")
-            
-    except KeyboardInterrupt:
-        click.echo("\n⏸️  Video creation interrupted by user")
-    except Exception as e:
-        click.echo(f"❌ Video creation failed: {str(e)}")
-
-@cli.command()
-def check_status():
-    """Check system status and dependencies."""
-    try:
-        click.echo("🔍 Checking AI Video Generator Status...")
-        click.echo("=" * 50)
-        
-        # Check directories
-        click.echo(f"📁 Assets Directory: {Config.ASSETS_DIR}")
-        click.echo(f"   {'✅ Exists' if os.path.exists(Config.ASSETS_DIR) else '❌ Missing'}")
-        
-        click.echo(f"📁 Output Directory: {Config.OUTPUT_DIR}")
-        click.echo(f"   {'✅ Exists' if os.path.exists(Config.OUTPUT_DIR) else '❌ Missing'}")
-        
-        # Check API key
-        click.echo(f"🔑 Pexels API Key: {'✅ Set' if Config.PEXELS_API_KEY else '❌ Not set'}")
-        
-        # Check pipelines
-        manager = get_pipeline_manager()
-        pipelines = manager.get_all_pipelines()
-        click.echo(f"🎬 Available Pipelines: {len(pipelines)}")
-        
-        # Check voices
-        click.echo(f"🎤 Available Voices: {len(Config.AVAILABLE_VOICES)}")
-        
-        # Check dependencies
-        click.echo("\n📦 Dependencies:")
-        try:
-            import edge_tts
-            click.echo("   ✅ edge-tts")
-        except ImportError:
-            click.echo("   ❌ edge-tts")
-        
-        try:
-            import moviepy
-            click.echo("   ✅ moviepy")
-        except ImportError:
-            click.echo("   ❌ moviepy")
-        
-        try:
-            import requests
-            click.echo("   ✅ requests")
-        except ImportError:
-            click.echo("   ❌ requests")
-        
-        try:
-            import PIL
-            click.echo("   ✅ Pillow")
-        except ImportError:
-            click.echo("   ❌ Pillow")
-        
-        click.echo("\n💡 If dependencies are missing, run: pip install -r requirements.txt")
-        
-    except Exception as e:
-        click.echo(f"❌ Error checking status: {str(e)}")
+# Make generate_video the default command
+cli.add_command(generate_video, name='create')
+cli.add_command(test_systems)
+cli.add_command(list_languages)
 
 if __name__ == '__main__':
-    cli() 
+    # If no arguments provided, run the main generate_video command
+    if len(sys.argv) == 1:
+        generate_video(
+            text=None,
+            category=None,
+            length=60,
+            language='en-US',
+            voice_gender='male',
+            output=None,
+            subtitles=True,
+            subtitle_style='professional',
+            upload=False,
+            images=4,
+            videos=2,
+            ai_model='llama3.2',
+            verbose=False
+        )
+    else:
+        cli() 
