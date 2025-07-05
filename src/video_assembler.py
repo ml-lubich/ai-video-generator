@@ -338,8 +338,12 @@ class VideoAssembler:
                     
                     if audio_clip.duration > final_video.duration:
                         logger.info(f"Extending video from {final_video.duration}s to {audio_clip.duration}s")
-                        # Loop video to match audio duration
-                        final_video = final_video.loop(duration=audio_clip.duration)
+                        # Calculate how many loops needed and create looped video
+                        loops_needed = int(audio_clip.duration / final_video.duration) + 1
+                        repeated_clips = [final_video] * loops_needed
+                        extended_video = concatenate_videoclips(repeated_clips, method="chain")
+                        # Trim to exact audio duration
+                        final_video = extended_video.subclipped(0, audio_clip.duration)
                     elif audio_clip.duration < final_video.duration:
                         logger.info(f"Trimming video from {final_video.duration}s to {audio_clip.duration}s")
                         # Trim video to match audio duration (preserves all audio)

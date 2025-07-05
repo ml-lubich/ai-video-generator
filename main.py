@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 
 @click.command()
-@click.option('--text', type=str, help='Custom text for video (if not provided, AI will generate content)')
-@click.option('--category', type=str, help='Content category (optional, used for AI generation or asset search)')
+@click.option('--text', type=str, help='Custom text for video (uses your exact script)')
+@click.option('--prompt', type=str, help='AI prompt for video generation (AI expands on your idea)')
+@click.option('--category', type=click.Choice(['technology', 'science', 'business', 'education', 'health', 'entertainment', 'travel', 'food', 'lifestyle', 'finance', 'art', 'sports', 'history', 'culture', 'nature', 'text']), help='Content category for AI generation')
 @click.option('--length', type=int, default=60, help='Average video length in seconds (guides AI, not hard limit)')
 @click.option('--language', type=str, default='en-US', help='Video language (default: en-US)')
 @click.option('--voice-gender', type=click.Choice(['male', 'female', 'random']), default='male', help='Voice gender preference')
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging')
 def generate_video(
     text: Optional[str],
+    prompt: Optional[str],
     category: Optional[str],
     length: int,
     language: str,
@@ -80,10 +82,16 @@ def generate_video(
         if text:
             click.echo(f"🎬 Creating video with custom text...")
             mode = "custom"
+        elif prompt:
+            click.echo(f"🤖 Creating AI-generated video from prompt...")
+            mode = "prompt"
+            # Check if AI system is available
+            if not creator.check_ai_system():
+                click.echo("❌ AI system not available. Please provide --text for custom video.")
+                return
         else:
             click.echo(f"🤖 Creating AI-generated video...")
             mode = "ai"
-            
             # Check if AI system is available
             if not creator.check_ai_system():
                 click.echo("❌ AI system not available. Please provide --text for custom video.")
@@ -91,6 +99,8 @@ def generate_video(
         
         # Display configuration
         click.echo(f"📝 Mode: {mode}")
+        if prompt:
+            click.echo(f"💡 Prompt: {prompt[:50]}{'...' if len(prompt) > 50 else ''}")
         click.echo(f"📂 Category: {category or 'auto-detect/random'}")
         click.echo(f"⏱️  Target length: {length}s")
         click.echo(f"🌍 Language: {language}")
@@ -101,6 +111,7 @@ def generate_video(
         # Create the video
         result = creator.create_video(
             text=text,
+            prompt=prompt,
             category=category,
             length=length,
             language=language,
@@ -172,6 +183,7 @@ class UnifiedVideoCreator:
     def create_video(
         self,
         text: Optional[str] = None,
+        prompt: Optional[str] = None,
         category: Optional[str] = None,
         length: int = 60,
         language: str = 'en-US',
@@ -184,10 +196,11 @@ class UnifiedVideoCreator:
         videos: int = 2
     ) -> Optional[Dict[str, Any]]:
         """
-        Create video with either custom text or AI-generated content.
+        Create video with custom text, AI prompt, or AI-generated content.
         
         Args:
-            text: Custom text (if None, AI generates content)
+            text: Custom text (uses exact script)
+            prompt: AI prompt (AI expands on your idea)
             category: Content category (optional)
             length: Target video length in seconds
             language: Video language
@@ -211,6 +224,21 @@ class UnifiedVideoCreator:
                 result = self._create_custom_video(
                     text=text,
                     category=category,
+                    language=language,
+                    voice_gender=voice_gender,
+                    output=output,
+                    subtitles=subtitles,
+                    subtitle_style=subtitle_style,
+                    upload=upload,
+                    images=images,
+                    videos=videos
+                )
+            elif prompt:
+                # AI prompt mode
+                result = self._create_prompt_video(
+                    prompt=prompt,
+                    category=category,
+                    length=length,
                     language=language,
                     voice_gender=voice_gender,
                     output=output,
@@ -306,6 +334,50 @@ class UnifiedVideoCreator:
             'youtube_url': youtube_url,
             'content_type': 'custom',
             'search_terms': search_terms
+        }
+    
+    def _create_prompt_video(
+        self,
+        prompt: str,
+        category: Optional[str],
+        length: int,
+        language: str,
+        voice_gender: str,
+        output: Optional[str],
+        subtitles: bool,
+        subtitle_style: str,
+        upload: bool,
+        images: int,
+        videos: int
+    ) -> Dict[str, Any]:
+        """Create video with AI prompt expansion."""
+        logger.info("Creating video with AI prompt expansion")
+        
+        if not self.video_factory:
+            self.video_factory = VideoFactory(model=self.ai_model)
+        
+        # Use the prompt as a custom topic for AI generation
+        result = self.video_factory.generate_single_video_with_prompt(
+            prompt=prompt,
+            category=category,
+            duration=length,
+            upload=upload,
+            language=language,
+            voice_gender=voice_gender
+        )
+        
+        if not result or not result.get('success'):
+            return {'success': False, 'error': 'AI prompt video generation failed'}
+        
+        return {
+            'success': True,
+            'video_path': result['video_path'],
+            'file_size': result['file_size'],
+            'video_id': result.get('video_id'),
+            'youtube_url': result.get('youtube_url'),
+            'content_type': 'prompt',
+            'ai_content': result.get('content'),
+            'original_prompt': prompt
         }
     
     def _create_ai_video(
@@ -462,6 +534,7 @@ if __name__ == '__main__':
     if len(sys.argv) == 1:
         generate_video(
             text=None,
+            prompt=None,
             category=None,
             length=60,
             language='en-US',

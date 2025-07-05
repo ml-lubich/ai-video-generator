@@ -284,6 +284,112 @@ Requirements:
             "tags": topic.lower().split()[:5]
         }
     
+    def generate_content_from_prompt(
+        self,
+        prompt: str,
+        category: str = None,
+        duration: int = 60,
+        format_type: str = "youtube_short"
+    ) -> Optional[VideoContent]:
+        """Generate complete video content based on a custom prompt.
+        
+        Args:
+            prompt: Custom prompt/idea to expand on
+            category: Optional category for context
+            duration: Target duration in seconds
+            format_type: Video format type
+            
+        Returns:
+            VideoContent object or None if failed
+        """
+        try:
+            logger.info(f"🎬 Generating video content from prompt: {prompt}")
+            
+            # Step 1: Generate topic from prompt
+            topic = self.generate_topic_from_prompt(prompt, category)
+            if not topic:
+                logger.error("Failed to generate topic from prompt")
+                return None
+            
+            # Step 2: Generate script
+            script = self.generate_script(topic, duration)
+            if not script:
+                logger.error("Failed to generate script")
+                return None
+            
+            # Step 3: Generate search query
+            search_query = self.generate_search_query(topic)
+            if not search_query:
+                logger.error("Failed to generate search query")
+                return None
+            
+            # Step 4: Generate metadata
+            metadata = self.generate_metadata(topic, script)
+            
+            # Step 5: Create content package
+            content = VideoContent(
+                topic=topic,
+                title=metadata.get("title", topic),
+                script=script,
+                search_query=search_query,
+                duration_estimate=duration,
+                tags=metadata.get("tags", []),
+                description=metadata.get("description", ""),
+                thumbnail_query=search_query.split()[0] if search_query else "generic"
+            )
+            
+            logger.info(f"✅ Generated prompt-based content: {content.title}")
+            return content
+            
+        except Exception as e:
+            logger.error(f"Prompt-based content generation failed: {str(e)}")
+            return None
+    
+    def generate_topic_from_prompt(self, prompt: str, category: str = None) -> Optional[str]:
+        """Generate a video topic from a custom prompt.
+        
+        Args:
+            prompt: Custom prompt/idea
+            category: Optional category for context
+            
+        Returns:
+            Generated topic or None if failed
+        """
+        try:
+            # Include category in the context if provided
+            context = f" in the {category} category" if category else ""
+            
+            prompt_text = f"""Based on this idea or prompt: "{prompt}"
+
+Generate a complete, engaging video topic{context} that expands on this concept.
+
+Requirements:
+- Build upon the original idea
+- Make it specific and engaging
+- Suitable for a video format
+- Current and relevant
+- Educational or entertaining
+
+Return ONLY the complete topic title, nothing else.
+
+Example input: "quantum computers"
+Example output: "How Quantum Computers Will Change Everything in the Next 5 Years"
+
+Topic:"""
+
+            topic = self.generate_with_ollama(prompt_text, max_tokens=100)
+            
+            if topic and len(topic) > 10:
+                logger.info(f"Generated topic from prompt: {topic}")
+                return topic
+            else:
+                logger.warning("Generated topic too short or empty")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Topic generation from prompt failed: {str(e)}")
+            return None
+    
     def generate_complete_content(
         self, 
         category: str = None, 

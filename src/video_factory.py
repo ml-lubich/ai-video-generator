@@ -99,6 +99,117 @@ class VideoFactory:
         
         return systems_ready
     
+    def generate_single_video_with_prompt(
+        self,
+        prompt: str,
+        category: str = None,
+        duration: int = None,
+        upload: bool = None,
+        language: str = "en-US",
+        voice_gender: str = "male"
+    ) -> Optional[Dict[str, Any]]:
+        """Generate a single video with a custom prompt."""
+        start_time = time.time()
+        
+        try:
+            logger.info("🎬 Starting prompt-based video generation...")
+            logger.info(f"💡 Prompt: {prompt}")
+            logger.info(f"📂 Category: {category or 'auto-detect'}")
+            logger.info(f"⏱️  Duration: {duration or self.settings['default_duration']}s")
+            logger.info(f"🌍 Language: {language}")
+            logger.info(f"🎤 Voice: {voice_gender}")
+            
+            # Step 1: Generate AI content based on prompt
+            logger.info("🧠 Step 1: Generating AI content from prompt...")
+            content = self.content_generator.generate_content_from_prompt(
+                prompt=prompt,
+                category=category,
+                duration=duration or self.settings["default_duration"]
+            )
+            
+            if not content:
+                logger.error("❌ Failed to generate content from prompt")
+                self.stats["failed_generations"] += 1
+                return None
+            
+            logger.info(f"✅ Generated content: {content.title}")
+            
+            # Step 2: Create video
+            logger.info("🎥 Step 2: Creating video...")
+            # Get appropriate voice for the language and gender
+            selected_voice = Config.get_voice_by_gender(gender=voice_gender, language=language)
+            
+            video_path = self.pipeline_runner.run_pipeline(
+                text=content.script,
+                search_terms=content.search_query,
+                voice=selected_voice,
+                output_filename=f"output/{self._sanitize_filename(content.title)}.mp4",
+                enable_subtitles=True,
+                subtitle_text=content.script
+            )
+            
+            if not video_path:
+                logger.error("❌ Failed to create video")
+                self.stats["failed_generations"] += 1
+                return None
+            
+            logger.info(f"✅ Video created: {video_path}")
+            self.stats["videos_generated"] += 1
+            
+            # Step 3: Upload to YouTube (if enabled)
+            video_id = None
+            youtube_url = None
+            if upload and self.youtube_uploader.service:
+                logger.info("📺 Step 3: Uploading to YouTube...")
+                video_id = self.youtube_uploader.upload_video(
+                    video_path=video_path,
+                    title=content.title,
+                    description=content.description,
+                    tags=content.tags,
+                    privacy_status="public" if self.settings["auto_publish"] else "unlisted"
+                )
+                
+                if video_id:
+                    logger.info(f"✅ Uploaded to YouTube: https://www.youtube.com/watch?v={video_id}")
+                    youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+                    self.stats["successful_uploads"] += 1
+                else:
+                    logger.error("❌ YouTube upload failed")
+                    self.stats["failed_uploads"] += 1
+                
+                self.stats["videos_uploaded"] += 1
+            
+            # Calculate processing time
+            processing_time = time.time() - start_time
+            self.stats["total_processing_time"] += processing_time
+            
+            # Calculate file size
+            file_size = os.path.getsize(video_path) if os.path.exists(video_path) else 0
+            
+            logger.info(f"🎉 Prompt-based video generation complete in {processing_time:.1f}s")
+            
+            # Return result package
+            return {
+                "success": True,
+                "video_path": video_path,
+                "file_size": file_size,
+                "processing_time": processing_time,
+                "video_id": video_id,
+                "youtube_url": youtube_url,
+                "content": asdict(content),
+                "stats": dict(self.stats)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Prompt-based video generation failed: {str(e)}")
+            self.stats["failed_generations"] += 1
+            return {
+                "success": False,
+                "error": str(e),
+                "processing_time": time.time() - start_time,
+                "stats": dict(self.stats)
+            }
+    
     def generate_single_video(
         self,
         category: str = None,
@@ -147,10 +258,13 @@ class VideoFactory:
             
             # Step 2: Create video
             logger.info("🎥 Step 2: Creating video...")
+            # Get appropriate voice for the language and gender
+            selected_voice = Config.get_voice_by_gender(gender=voice_gender, language=language)
+            
             video_path = self.pipeline_runner.run_pipeline(
                 text=content.script,
                 search_terms=content.search_query,
-                voice_gender=voice_gender,
+                voice=selected_voice,
                 output_filename=f"output/{self._sanitize_filename(content.title)}.mp4",
                 enable_subtitles=True,
                 subtitle_text=content.script
