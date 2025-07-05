@@ -4,6 +4,10 @@ Single responsibility: Assemble images, videos, and audio into final video outpu
 """
 import logging
 import os
+import srt
+import ffmpeg
+import whisper
+from datetime import timedelta
 from typing import List, Optional, Dict, Union
 
 from moviepy import (
@@ -34,8 +38,167 @@ class VideoAssembler:
         # Ensure directories exist
         Config.ensure_directories()
     
+    def generate_srt_file(self, text: str, duration: float, output_path: str = None):
+        """Generate SRT subtitle file.
+        
+        Args:
+            text: The text to display as subtitles
+            duration: Duration of the video in seconds
+            output_path: Path to save the SRT file
+            
+        Returns:
+            Path to the generated SRT file
+        """
+        try:
+            # Split text into sentences for better subtitle timing
+            sentences = text.split('. ')
+            if len(sentences) == 1:
+                # If no sentences, split by commas or use the whole text
+                sentences = text.split(', ') if ',' in text else [text]
+            
+            # Calculate timing for each subtitle based on text length (more accurate)
+            # Remove empty sentences first
+            sentences = [s.strip() for s in sentences if s.strip()]
+            
+            # Calculate duration based on text length (words per minute approach)
+            sentence_lengths = [len(sentence.split()) for sentence in sentences]
+            total_words = sum(sentence_lengths)
+            
+            subs = []
+            current_time = 0.0
+            
+            for i, sentence in enumerate(sentences):
+                if sentence.strip():  # Only add non-empty sentences
+                    # Calculate duration based on word count proportion
+                    word_count = len(sentence.split())
+                    sentence_duration = (word_count / total_words) * duration
+                    
+                    start_time = timedelta(seconds=current_time)
+                    end_time = timedelta(seconds=current_time + sentence_duration)
+                    current_time += sentence_duration
+                    
+                    # Clean up sentence
+                    sentence = sentence.strip()
+                    if not sentence.endswith('.') and i < len(sentences) - 1:
+                        sentence += '.'
+                    
+                    subtitle = srt.Subtitle(
+                        index=i + 1,
+                        start=start_time,
+                        end=end_time,
+                        content=sentence
+                    )
+                    subs.append(subtitle)
+            
+            # Generate SRT content
+            srt_content = srt.compose(subs)
+            
+            # Save to file
+            if not output_path:
+                output_path = os.path.join(Config.OUTPUT_DIR, "subtitles.srt")
+            
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(srt_content)
+            
+            logger.info(f"Generated SRT file: {output_path}")
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"Failed to generate SRT file: {str(e)}")
+            return None
+    
+    def generate_srt_with_whisper(self, audio_path: str, output_path: str = None) -> Optional[str]:
+        """Generate SRT file with accurate timing using Whisper speech recognition.
+        
+        Args:
+            audio_path: Path to the audio file
+            output_path: Path to save the SRT file
+            
+        Returns:
+            Path to the generated SRT file or None if failed
+        """
+        try:
+            logger.info(f"Using Whisper for accurate subtitle timing: {os.path.basename(audio_path)}")
+            
+            # Load Whisper model (use small model for speed)
+            model = whisper.load_model("base")
+            
+            # Transcribe audio with word-level timestamps
+            result = model.transcribe(audio_path, word_timestamps=True)
+            
+            # Extract segments with timing
+            segments = result['segments']
+            subs = []
+            
+            for i, segment in enumerate(segments):
+                start_time = timedelta(seconds=segment['start'])
+                end_time = timedelta(seconds=segment['end'])
+                text = segment['text'].strip()
+                
+                if text:  # Only add non-empty segments
+                    subtitle = srt.Subtitle(
+                        index=i + 1,
+                        start=start_time,
+                        end=end_time,
+                        content=text
+                    )
+                    subs.append(subtitle)
+            
+            # Generate SRT content
+            srt_content = srt.compose(subs)
+            
+            # Save to file
+            if not output_path:
+                output_path = os.path.join(Config.OUTPUT_DIR, "whisper_subtitles.srt")
+            
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(srt_content)
+            
+            logger.info(f"Whisper-generated SRT file: {output_path}")
+            logger.info(f"Generated {len(subs)} subtitle segments")
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"Failed to generate SRT with Whisper: {str(e)}")
+            return None
+    
+    def burn_subtitles_with_ffmpeg(self, video_path: str, srt_path: str, output_path: str) -> Optional[str]:
+        """Burn subtitles into video using FFmpeg for better quality.
+        
+        Args:
+            video_path: Path to input video
+            srt_path: Path to SRT subtitle file
+            output_path: Path for output video with burned subtitles
+            
+        Returns:
+            Path to output video or None if failed
+        """
+        try:
+            logger.info(f"Burning subtitles using FFmpeg: {os.path.basename(srt_path)}")
+            
+            # Use FFmpeg to burn subtitles with professional styling
+            (
+                ffmpeg
+                .input(video_path)
+                .output(
+                    output_path,
+                    vf=f"subtitles={srt_path}:force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00ffffff,OutlineColour=&H00000000,Outline=1,Shadow=1,Alignment=2'",
+                    vcodec='libx264',
+                    acodec='copy'  # Copy audio without re-encoding
+                )
+                .overwrite_output()
+                .run(quiet=True)
+            )
+            
+            logger.info(f"FFmpeg subtitle burning complete: {output_path}")
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"FFmpeg subtitle burning failed: {str(e)}")
+            return None
+
     def add_subtitles(self, video_clip, text: str, enable_subtitles: bool = True, subtitle_style: str = "professional"):
-        """Add stylized subtitles to a video clip.
+        """Add stylized subtitles to a video clip with improved error handling.
         
         Args:
             video_clip: The video clip to add subtitles to
@@ -53,61 +216,50 @@ class VideoAssembler:
             # Get style configuration
             style_config = Config.SUBTITLE_STYLES.get(subtitle_style, Config.SUBTITLE_STYLES["professional"])
             
-            logger.info(f"Adding subtitles with {subtitle_style} style")
+            logger.info(f"Adding subtitles with {subtitle_style} style: '{text[:50]}...'")
             
-            # Create subtitle text clip with correct MoviePy 2.1.2 parameters
+            # Create subtitle text clip with simplified approach for better compatibility
             try:
-                # Use correct MoviePy 2.1.2 API
-                subtitle_clip = TextClip(
-                    text=text,
-                    font_size=style_config["font_size"],
-                    color=style_config["color"],
-                    stroke_color=style_config["stroke_color"],
-                    stroke_width=style_config["stroke_width"],
-                    method='caption',
-                    size=self.resolution
-                )
-            except Exception as e:
-                logger.warning(f"Failed with advanced styling, using basic: {e}")
-                # Fallback to basic subtitle without stroke
+                # Simple approach - just use basic TextClip with position
                 subtitle_clip = TextClip(
                     text=text,
                     font_size=style_config["font_size"],
                     color=style_config["color"],
                     method='caption',
-                    size=self.resolution
-                )
-            
-            # Position subtitles with better styling
-            subtitle_clip = subtitle_clip.set_position(('center', 'bottom')).set_margin(Config.SUBTITLE_MARGIN)
-            subtitle_clip = subtitle_clip.set_duration(video_clip.duration)
-            
-            # Add shadow effect (simulated with multiple text layers)
-            shadow_offset = style_config["shadow_offset"]
-            if shadow_offset != (0, 0):
-                # Create shadow clip with correct parameters
-                shadow_clip = TextClip(
-                    text=text,
-                    font_size=style_config["font_size"],
-                    color='black',  # Shadow color
-                    method='caption',
-                    size=self.resolution
+                    size=(self.resolution[0], None)  # Fixed: Add size parameter for caption method
                 )
                 
-                # Position shadow with offset
-                shadow_x = 'center' if shadow_offset[0] == 0 else f'center+{shadow_offset[0]}'
-                shadow_y = f'bottom+{shadow_offset[1]}'
-                shadow_clip = shadow_clip.set_position((shadow_x, shadow_y)).set_margin(Config.SUBTITLE_MARGIN)
-                shadow_clip = shadow_clip.set_duration(video_clip.duration)
+                # Position at bottom with margin
+                y_position = video_clip.h - Config.SUBTITLE_MARGIN - style_config["font_size"]
+                subtitle_clip = subtitle_clip.with_position(('center', y_position))
+                subtitle_clip = subtitle_clip.with_duration(video_clip.duration)
                 
-                # Composite video with shadow and subtitles
-                final_video = CompositeVideoClip([video_clip, shadow_clip, subtitle_clip])
-            else:
-                # Composite video with subtitles only
+                # Create composite video
                 final_video = CompositeVideoClip([video_clip, subtitle_clip])
-            
-            logger.info(f"Successfully added {subtitle_style} subtitles")
-            return final_video
+                
+                logger.info("Successfully added subtitles with simplified approach")
+                return final_video
+                
+            except Exception as e:
+                logger.warning(f"Simplified subtitle approach failed: {e}")
+                
+                # Ultra-basic fallback
+                try:
+                    subtitle_clip = TextClip(
+                        text=text,
+                        font_size=36,
+                        color='white'
+                    )
+                    subtitle_clip = subtitle_clip.with_position(('center', 'bottom'))
+                    subtitle_clip = subtitle_clip.with_duration(video_clip.duration)
+                    
+                    final_video = CompositeVideoClip([video_clip, subtitle_clip])
+                    logger.info("Successfully added subtitles with basic fallback")
+                    return final_video
+                    
+                except Exception as e2:
+                    logger.error(f"All subtitle approaches failed: {e2}")
+                    return video_clip
             
         except Exception as e:
             logger.warning(f"Failed to add subtitles: {str(e)}")
@@ -213,25 +365,59 @@ class VideoAssembler:
                     logger.error(f"Failed to add audio: {str(e)}")
                     # Continue without audio rather than failing
             
-            # Add subtitles if requested
+            # Add subtitles if requested (optional)
             if enable_subtitles and subtitle_text:
                 logger.info("Adding subtitles to video")
-                final_video = self.add_subtitles(final_video, subtitle_text, enable_subtitles, subtitle_style)
+                
+                # Generate SRT file first - try Whisper for accurate timing
+                srt_path = output_path.replace('.mp4', '.srt') if output_path else None
+                
+                # Try Whisper method first (more accurate), fallback to text-based
+                whisper_srt = self.generate_srt_with_whisper(audio_path, srt_path) if audio_path else None
+                if not whisper_srt:
+                    logger.info("Whisper method failed, using text-based timing")
+                    self.generate_srt_file(subtitle_text, final_video.duration, srt_path)
+                else:
+                    logger.info("Using Whisper-generated subtitles for accurate timing")
+                
+                # Skip MoviePy subtitle burning to avoid double subtitles
+                # We'll use only FFmpeg subtitle burning for better quality
+                logger.info("Skipping MoviePy subtitle burning - will use FFmpeg post-processing")
             
             # Generate output path if not provided
             if output_path is None:
                 output_path = os.path.join(Config.OUTPUT_DIR, "generated_video.mp4")
             
             # Write final video with proper audio encoding
-            logger.info(f"Writing final video: {output_path}")
+            temp_output_path = output_path.replace('.mp4', '_temp.mp4') if enable_subtitles and subtitle_text else output_path
+            logger.info(f"Writing final video: {temp_output_path}")
             final_video.write_videofile(
-                output_path,
+                temp_output_path,
                 fps=self.fps,
                 codec='libx264',
                 audio_codec='aac',
                 temp_audiofile='temp-audio.m4a',
                 remove_temp=True
             )
+            
+            # Apply FFmpeg subtitle burning if subtitles are enabled
+            if enable_subtitles and subtitle_text and temp_output_path != output_path:
+                logger.info("Applying FFmpeg subtitle burning...")
+                srt_path = output_path.replace('.mp4', '.srt')
+                if self.burn_subtitles_with_ffmpeg(temp_output_path, srt_path, output_path):
+                    # Clean up temporary file
+                    try:
+                        os.remove(temp_output_path)
+                        logger.info("FFmpeg subtitle burning successful, cleaned up temp file")
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up temp file: {e}")
+                else:
+                    # FFmpeg failed, rename temp file to final output
+                    try:
+                        os.rename(temp_output_path, output_path)
+                        logger.warning("FFmpeg subtitle burning failed, using video without subtitles")
+                    except Exception as e:
+                        logger.error(f"Failed to rename temp file: {e}")
             
             # Clean up clips
             for clip in clips:
@@ -347,6 +533,10 @@ class VideoAssembler:
             if enable_subtitles and subtitle_text:
                 logger.info("Adding subtitles to slideshow")
                 final_video = self.add_subtitles(final_video, subtitle_text, enable_subtitles, subtitle_style)
+                
+                # Also generate SRT file for external use
+                srt_path = output_path.replace('.mp4', '.srt') if output_path else None
+                self.generate_srt_file(subtitle_text, final_video.duration, srt_path)
             
             # Generate output path if not provided
             if output_path is None:

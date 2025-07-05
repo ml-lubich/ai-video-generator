@@ -180,7 +180,7 @@ class Config:
     DEFAULT_RESOLUTION = (1920, 1080)
     
     # Subtitle Configuration
-    SUBTITLE_FONT_SIZE = 56
+    SUBTITLE_FONT_SIZE = 24
     SUBTITLE_FONT_COLOR = "white"
     SUBTITLE_FONT_FAMILY = "Arial-Bold"
     SUBTITLE_POSITION = ("center", "bottom")
