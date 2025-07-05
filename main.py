@@ -8,9 +8,11 @@ import os
 import sys
 from typing import Optional
 
-# Add the current directory to the path so we can import our modules
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add the src directory to the Python path
+src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
+sys.path.insert(0, src_path)
 
+# Now import from the src directory
 from pipeline_config import get_pipeline_manager
 from pipeline_runner import PipelineRunner
 from config import Config
@@ -198,7 +200,7 @@ def list_voices():
 @click.option('--search', '-s', required=True, help='Search terms for visual assets')
 @click.option('--voice', '-v', help='Voice to use')
 @click.option('--randomize-voice', '-r', is_flag=True, help='Use random voice')
-@click.option('--voice-gender', '-g', type=click.Choice(['male', 'female']), help='Voice gender preference')
+@click.option('--voice-gender', '-g', type=click.Choice(['male', 'female']), help='Preferred voice gender')
 @click.option('--images', '-i', default=3, help='Number of images to fetch')
 @click.option('--videos', '-V', default=1, help='Number of videos to fetch')
 @click.option('--output', '-o', help='Output filename (without extension)')
@@ -207,9 +209,6 @@ def list_voices():
 def create_custom(text, search, voice, randomize_voice, voice_gender, images, videos, output, subtitles, subtitle_text):
     """Create a custom video with your own parameters."""
     try:
-        click.echo("🎬 Creating Custom Video")
-        click.echo("=" * 30)
-        
         # Determine voice
         if voice:
             selected_voice = voice
@@ -223,25 +222,26 @@ def create_custom(text, search, voice, randomize_voice, voice_gender, images, vi
         else:
             selected_voice = Config.DEFAULT_VOICE
         
-        click.echo(f"📝 Text: {text[:50]}{'...' if len(text) > 50 else ''}")
-        click.echo(f"🔍 Search: {search}")
-        click.echo(f"🎤 Voice: {selected_voice}")
-        click.echo(f"🖼️  Assets: {images} images, {videos} videos")
-        
-        if subtitles:
-            click.echo(f"📄 Subtitles: Enabled")
-        
         # Set output filename
         if output:
             output_filename = os.path.join(Config.OUTPUT_DIR, f"{output}.mp4")
         else:
             output_filename = os.path.join(Config.OUTPUT_DIR, "custom_video.mp4")
         
+        click.echo(f"🎬 Creating Custom Video")
+        click.echo(f"📝 Text: {text[:50]}{'...' if len(text) > 50 else ''}")
+        click.echo(f"🔍 Search: {search}")
+        click.echo(f"🎤 Voice: {selected_voice}")
+        click.echo(f"🖼️  Assets: {images} images, {videos} videos")
         click.echo(f"📄 Output: {os.path.basename(output_filename)}")
+        
+        if subtitles:
+            click.echo(f"📄 Subtitles: Enabled")
+        
         click.echo()
         click.echo("🚀 Starting video creation...")
         
-        # Create video
+        # Initialize and run pipeline
         runner = PipelineRunner()
         result = runner.run_pipeline(
             text=text,
@@ -256,7 +256,7 @@ def create_custom(text, search, voice, randomize_voice, voice_gender, images, vi
         
         if result:
             file_size = os.path.getsize(result)
-            click.echo("🎉 Custom video created successfully!")
+            click.echo("🎉 Video creation completed successfully!")
             click.echo(f"📹 Generated video: {os.path.basename(result)}")
             click.echo(f"📊 File size: {file_size:,} bytes ({file_size/1024/1024:.1f} MB)")
         else:
@@ -269,49 +269,59 @@ def create_custom(text, search, voice, randomize_voice, voice_gender, images, vi
 
 @cli.command()
 def check_status():
-    """Check the status of the video generator system."""
+    """Check system status and dependencies."""
     try:
-        click.echo("🔍 System Status Check")
-        click.echo("=" * 25)
-        
-        # Check API key
-        api_key = Config.get_pexels_api_key()
-        if api_key and api_key != 'your_pexels_api_key_here':
-            click.echo("✅ Pexels API Key: Configured")
-        else:
-            click.echo("❌ Pexels API Key: Not configured")
-            click.echo("   Please set PEXELS_API_KEY in your .env file")
+        click.echo("🔍 Checking AI Video Generator Status...")
+        click.echo("=" * 50)
         
         # Check directories
-        directories = [Config.ASSETS_DIR, Config.IMAGES_DIR, Config.CLIPS_DIR, Config.AUDIO_DIR, Config.OUTPUT_DIR]
-        for directory in directories:
-            if os.path.exists(directory):
-                click.echo(f"✅ Directory: {directory}")
-            else:
-                click.echo(f"❌ Directory: {directory} (missing)")
+        click.echo(f"📁 Assets Directory: {Config.ASSETS_DIR}")
+        click.echo(f"   {'✅ Exists' if os.path.exists(Config.ASSETS_DIR) else '❌ Missing'}")
         
-        # Check voice configuration
-        click.echo(f"✅ Available Voices: {len(Config.AVAILABLE_VOICES)}")
-        click.echo(f"✅ Default Voice: {Config.DEFAULT_VOICE}")
-        click.echo(f"✅ Subtitle Support: Enabled")
+        click.echo(f"📁 Output Directory: {Config.OUTPUT_DIR}")
+        click.echo(f"   {'✅ Exists' if os.path.exists(Config.OUTPUT_DIR) else '❌ Missing'}")
         
-        # Get pipeline info
-        runner = PipelineRunner()
-        info = runner.get_pipeline_info()
-        click.echo(f"✅ Male Voices: {len(info['male_voices'])}")
-        click.echo(f"✅ Female Voices: {len(info['female_voices'])}")
+        # Check API key
+        click.echo(f"🔑 Pexels API Key: {'✅ Set' if Config.PEXELS_API_KEY else '❌ Not set'}")
         
-        # Check recent outputs
-        if os.path.exists(Config.OUTPUT_DIR):
-            outputs = [f for f in os.listdir(Config.OUTPUT_DIR) if f.endswith('.mp4')]
-            click.echo(f"📁 Recent Videos: {len(outputs)}")
-            for output in outputs[:3]:  # Show last 3
-                path = os.path.join(Config.OUTPUT_DIR, output)
-                size = os.path.getsize(path)
-                click.echo(f"   📹 {output} ({size/1024/1024:.1f} MB)")
+        # Check pipelines
+        manager = get_pipeline_manager()
+        pipelines = manager.get_all_pipelines()
+        click.echo(f"🎬 Available Pipelines: {len(pipelines)}")
+        
+        # Check voices
+        click.echo(f"🎤 Available Voices: {len(Config.AVAILABLE_VOICES)}")
+        
+        # Check dependencies
+        click.echo("\n📦 Dependencies:")
+        try:
+            import edge_tts
+            click.echo("   ✅ edge-tts")
+        except ImportError:
+            click.echo("   ❌ edge-tts")
+        
+        try:
+            import moviepy
+            click.echo("   ✅ moviepy")
+        except ImportError:
+            click.echo("   ❌ moviepy")
+        
+        try:
+            import requests
+            click.echo("   ✅ requests")
+        except ImportError:
+            click.echo("   ❌ requests")
+        
+        try:
+            import PIL
+            click.echo("   ✅ Pillow")
+        except ImportError:
+            click.echo("   ❌ Pillow")
+        
+        click.echo("\n💡 If dependencies are missing, run: pip install -r requirements.txt")
         
     except Exception as e:
-        click.echo(f"❌ Status check failed: {str(e)}")
+        click.echo(f"❌ Error checking status: {str(e)}")
 
 if __name__ == '__main__':
     cli() 
