@@ -65,9 +65,7 @@ output/
 *.mkv
 
 # Assets (uncomment if you don't want to track downloaded assets)
-# assets/audio/
-# assets/images/
-# assets/clips/
+assets/
 
 # Logs
 *.log
