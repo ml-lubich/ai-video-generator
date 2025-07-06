@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class VideoFactory:
     """Automated AI video production and publishing system."""
     
-    def __init__(self, ollama_host: str = "http://localhost:11434", model: str = "llama3.2"):
+    def __init__(self, ollama_host: str = "http://localhost:11434", model: str = "llama3.1"):
         """Initialize the video factory.
         
         Args:
@@ -135,8 +135,35 @@ class VideoFactory:
             
             logger.info(f"✅ Generated content: {content.title}")
             
-            # Step 2: Create video
-            logger.info("🎥 Step 2: Creating video...")
+            # Log the script text that will be used for audio generation
+            logger.info("📝 Script text for audio generation:")
+            logger.info(f"'{content.script}'")
+            
+            # Step 2: Create organized output folder
+            logger.info("📁 Step 2: Creating organized output folder...")
+            video_folder_name = self._sanitize_filename(content.title)
+            video_folder_path = os.path.join("output", video_folder_name)
+            os.makedirs(video_folder_path, exist_ok=True)
+            
+            # Save the original script text to a file
+            script_file_path = os.path.join(video_folder_path, "original_script.txt")
+            with open(script_file_path, 'w', encoding='utf-8') as f:
+                f.write(f"Video Title: {content.title}\n")
+                f.write(f"Generated Topic: {content.topic}\n") 
+                f.write(f"Language: {language}\n")
+                f.write(f"Voice: {Config.get_voice_by_gender(gender=voice_gender, language=language)}\n")
+                f.write(f"Search Terms: {content.search_query}\n")
+                f.write(f"Duration: {duration or self.settings['default_duration']}s\n")
+                f.write(f"Generated On: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("\n" + "="*50 + "\n")
+                f.write("ORIGINAL SCRIPT TEXT (used for audio generation):\n")
+                f.write("="*50 + "\n\n")
+                f.write(content.script)
+            
+            logger.info(f"💾 Saved original script to: {script_file_path}")
+            
+            # Step 3: Create video
+            logger.info("🎥 Step 3: Creating video...")
             # Get appropriate voice for the language and gender
             selected_voice = Config.get_voice_by_gender(gender=voice_gender, language=language)
             
@@ -144,9 +171,10 @@ class VideoFactory:
                 text=content.script,
                 search_terms=content.search_query,
                 voice=selected_voice,
-                output_filename=f"output/{self._sanitize_filename(content.title)}.mp4",
+                output_filename=os.path.join(video_folder_path, f"{video_folder_name}.mp4"),
                 enable_subtitles=True,
-                subtitle_text=content.script
+                subtitle_text=content.script,
+                language=language
             )
             
             if not video_path:
@@ -157,11 +185,11 @@ class VideoFactory:
             logger.info(f"✅ Video created: {video_path}")
             self.stats["videos_generated"] += 1
             
-            # Step 3: Upload to YouTube (if enabled)
+            # Step 4: Upload to YouTube (if enabled)
             video_id = None
             youtube_url = None
             if upload and self.youtube_uploader.service:
-                logger.info("📺 Step 3: Uploading to YouTube...")
+                logger.info("📺 Step 4: Uploading to YouTube...")
                 video_id = self.youtube_uploader.upload_video(
                     video_path=video_path,
                     title=content.title,
@@ -258,8 +286,35 @@ class VideoFactory:
             
             logger.info(f"✅ Generated content: {content.title}")
             
-            # Step 2: Create video
-            logger.info("🎥 Step 2: Creating video...")
+            # Log the script text that will be used for audio generation
+            logger.info("📝 Script text for audio generation:")
+            logger.info(f"'{content.script}'")
+            
+            # Step 2: Create organized output folder
+            logger.info("📁 Step 2: Creating organized output folder...")
+            video_folder_name = self._sanitize_filename(content.title)
+            video_folder_path = os.path.join("output", video_folder_name)
+            os.makedirs(video_folder_path, exist_ok=True)
+            
+            # Save the original script text to a file
+            script_file_path = os.path.join(video_folder_path, "original_script.txt")
+            with open(script_file_path, 'w', encoding='utf-8') as f:
+                f.write(f"Video Title: {content.title}\n")
+                f.write(f"Generated Topic: {content.topic}\n") 
+                f.write(f"Language: {language}\n")
+                f.write(f"Voice: {Config.get_voice_by_gender(gender=voice_gender, language=language)}\n")
+                f.write(f"Search Terms: {content.search_query}\n")
+                f.write(f"Duration: {duration}s\n")
+                f.write(f"Generated On: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("\n" + "="*50 + "\n")
+                f.write("ORIGINAL SCRIPT TEXT (used for audio generation):\n")
+                f.write("="*50 + "\n\n")
+                f.write(content.script)
+            
+            logger.info(f"💾 Saved original script to: {script_file_path}")
+            
+            # Step 3: Create video
+            logger.info("🎥 Step 3: Creating video...")
             # Get appropriate voice for the language and gender
             selected_voice = Config.get_voice_by_gender(gender=voice_gender, language=language)
             
@@ -267,9 +322,10 @@ class VideoFactory:
                 text=content.script,
                 search_terms=content.search_query,
                 voice=selected_voice,
-                output_filename=f"output/{self._sanitize_filename(content.title)}.mp4",
+                output_filename=os.path.join(video_folder_path, f"{video_folder_name}.mp4"),
                 enable_subtitles=True,
-                subtitle_text=content.script
+                subtitle_text=content.script,
+                language=language
             )
             
             if not video_path:
@@ -280,10 +336,10 @@ class VideoFactory:
             logger.info(f"✅ Video created: {video_path}")
             self.stats["videos_generated"] += 1
             
-            # Step 3: Upload to YouTube (if enabled)
+            # Step 4: Upload to YouTube (if enabled)
             video_id = None
             if upload and self.youtube_uploader.service:
-                logger.info("📺 Step 3: Uploading to YouTube...")
+                logger.info("📺 Step 4: Uploading to YouTube...")
                 video_id = self.youtube_uploader.upload_video(
                     video_path=video_path,
                     title=content.title,

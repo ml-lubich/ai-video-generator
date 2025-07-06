@@ -1,6 +1,9 @@
-# 🎬 AI Video Factory
+# 🎬 AI Video Generator
 
 **Complete AI-powered video generation and publishing system** with automated content creation, subtitle synchronization, and YouTube publishing.
+
+![Example Video 1](docs/example1.png)
+![Example Video 2](docs/example2.png)
 
 ## 🚀 **What It Does**
 
@@ -12,6 +15,9 @@
 - **🏭 Factory Mode**: Continuous production of multiple videos per day
 
 ## 🏗️ **System Architecture**
+
+### 📊 **System Workflow**
+![Flowchart](docs/flowchart.svg)
 
 ### Core Components (SOLID Principles)
 - **config.py** - Centralized configuration management

@@ -107,12 +107,13 @@ class VideoAssembler:
             logger.error(f"Failed to generate SRT file: {str(e)}")
             return None
     
-    def generate_srt_with_whisper(self, audio_path: str, output_path: str = None) -> Optional[str]:
+    def generate_srt_with_whisper(self, audio_path: str, output_path: str = None, language: str = None) -> Optional[str]:
         """Generate SRT file with accurate timing using Whisper speech recognition.
         
         Args:
             audio_path: Path to the audio file
             output_path: Path to save the SRT file
+            language: Language code for better recognition (e.g., 'ru', 'en')
             
         Returns:
             Path to the generated SRT file or None if failed
@@ -123,8 +124,18 @@ class VideoAssembler:
             # Load Whisper model (use small model for speed)
             model = whisper.load_model("base")
             
-            # Transcribe audio with word-level timestamps
-            result = model.transcribe(audio_path, word_timestamps=True)
+            # Map language codes for Whisper (ru-RU -> ru, en-US -> en)
+            whisper_language = None
+            if language:
+                whisper_language = language.split('-')[0].lower()  # ru-RU -> ru, en-US -> en
+                logger.info(f"Using language hint for Whisper: {whisper_language}")
+            
+            # Transcribe audio with word-level timestamps and language hint
+            transcribe_options = {"word_timestamps": True}
+            if whisper_language:
+                transcribe_options["language"] = whisper_language
+            
+            result = model.transcribe(audio_path, **transcribe_options)
             
             # Extract segments with timing
             segments = result['segments']
@@ -377,7 +388,14 @@ class VideoAssembler:
                 srt_path = output_path.replace('.mp4', '.srt') if output_path else None
                 
                 # Try Whisper method first (more accurate), fallback to text-based
-                whisper_srt = self.generate_srt_with_whisper(audio_path, srt_path) if audio_path else None
+                # Pass language information to Whisper for better recognition
+                voice_language = None
+                if audio_path:
+                    # Try to detect language from audio file name or path
+                    # This could be improved by passing language as parameter
+                    pass
+                
+                whisper_srt = self.generate_srt_with_whisper(audio_path, srt_path, language=voice_language) if audio_path else None
                 if not whisper_srt:
                     logger.info("Whisper method failed, using text-based timing")
                     self.generate_srt_file(subtitle_text, final_video.duration, srt_path)

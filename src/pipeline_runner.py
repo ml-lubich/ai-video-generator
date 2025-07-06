@@ -40,12 +40,13 @@ class PipelineRunner:
         voice: str = None,
         randomize_voice: bool = False,
         voice_gender: str = None,
-        num_images: int = 3,
-        num_videos: int = 1,
+        num_images: int = 0,
+        num_videos: int = 5,
         output_filename: str = None,
         enable_subtitles: bool = False,
         subtitle_text: str = None,
-        subtitle_style: str = "professional"
+        subtitle_style: str = "professional",
+        language: str = "en-US"
     ) -> Optional[str]:
         """Run the complete video generation pipeline.
         

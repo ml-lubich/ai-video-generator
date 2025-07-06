@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 @click.option('--subtitles/--no-subtitles', default=True, help='Enable subtitles')
 @click.option('--subtitle-style', type=click.Choice(['professional', 'modern', 'cinematic']), default='professional', help='Subtitle style')
 @click.option('--upload/--no-upload', default=False, help='Upload to YouTube')
-@click.option('--images', type=int, default=4, help='Number of images to include')
-@click.option('--videos', type=int, default=2, help='Number of video clips to include')
-@click.option('--ai-model', type=str, default='llama3.2', help='AI model for content generation')
+@click.option('--images', type=int, default=0, help='Number of images to include')
+@click.option('--videos', type=int, default=5, help='Number of video clips to include')
+@click.option('--ai-model', type=str, default='llama3.1', help='AI model for content generation')
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging')
 def generate_video(
     text: Optional[str],

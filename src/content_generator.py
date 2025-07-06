@@ -30,7 +30,7 @@ class VideoContent:
 class OllamaContentGenerator:
     """Generate video content using Ollama AI models."""
     
-    def __init__(self, ollama_host: str = "http://localhost:11434", model: str = "llama3.2"):
+    def __init__(self, ollama_host: str = "http://localhost:11434", model: str = "llama3.1"):
         """Initialize the content generator.
         
         Args:
@@ -123,7 +123,10 @@ class OllamaContentGenerator:
             
             # Language-specific instructions
             language_name = self._get_language_name(language)
-            language_instruction = f"Generate the topic in {language_name}." if language != "en-US" else ""
+            if language != "en-US":
+                language_instruction = f"IMPORTANT: Generate the topic title ENTIRELY in {language_name}. Do not mix languages."
+            else:
+                language_instruction = ""
             
             prompt = f"""Generate a trending, engaging video topic about {selected_category} that would be perfect for YouTube or social media. 
 
@@ -170,26 +173,107 @@ Topic:"""
             
             # Language-specific instructions
             language_name = self._get_language_name(language)
-            language_instruction = f"Write the script in {language_name}." if language != "en-US" else ""
+            if language != "en-US":
+                language_instruction = f"IMPORTANT: Write the ENTIRE script in {language_name} only. Do not mix languages. The script must be 100% in {language_name}."
+            else:
+                language_instruction = ""
             
-            prompt = f"""Write an engaging video script about: {topic}
+            prompt = f"""Write a compelling, educational video script about: {topic}
 
-Requirements:
+STRUCTURE REQUIREMENTS:
+🎬 BEGINNING (Hook - First 15% of script):
+- Start with a compelling question, surprising fact, or bold statement
+- Create immediate curiosity and urgency
+- Set clear expectations for what viewers will learn
+
+📖 MIDDLE (Content - 70% of script):
+- Present 2-3 key points with specific examples and facts
+- Use natural transitions between points ("But here's what's fascinating...", "Now, here's the game-changer...")
+- Include concrete evidence, statistics, or real-world examples
+- Build knowledge progressively from simple to complex
+
+🎯 END (Conclusion - Final 15% of script):
+- Summarize the key takeaway or main insight
+- End with a thought-provoking question or call to action
+- Leave viewers wanting to learn more
+
+TONE & STYLE:
 - Target length: {target_words} words (for {duration} seconds)
-- Conversational and engaging tone
-- Hook viewers in first 5 seconds
-- Include specific facts or insights
-- End with a call to engagement
-- Write in first person as narrator
-- NO stage directions or camera notes
-- Just the spoken narration text
+- CONVERSATIONAL and NATURAL tone - like an enthusiastic teacher explaining something fascinating
+- Use natural speech patterns with contractions (I'm, we're, don't, etc.)
+- Add personality and enthusiasm - sound genuinely excited about the topic
+- Include brief pauses and natural transitions
+- Write in first person as an expert sharing knowledge
+- NO stage directions, camera notes, or overly formal language
+- STAY EXACTLY on the topic provided
 - {language_instruction}
+- Be factual and educational but engaging, not dry or academic
+
+CONTENT QUALITY:
+- Include specific facts, numbers, or examples to support every claim
+- Use storytelling elements when appropriate
+- Make complex concepts accessible to general audiences
+- Focus on WHY the topic matters to viewers' lives
+
+Make it sound like a passionate expert sharing fascinating knowledge!
+
+IMPORTANT: Return ONLY the spoken script text. NO markdown formatting, section headers, or stage directions. Just the natural spoken words that will be used for the audio voiceover.
 
 Script:"""
 
             script = self.generate_with_ollama(prompt, max_tokens=target_words + 100)
             
             if script and len(script.split()) > 20:
+                # Clean up the script - remove any formatting or instructions that might leak through
+                script = script.strip()
+                
+                # Remove common formatting that might appear
+                unwanted_phrases = [
+                    "Here's the script", "Here is the script", "**BEGINNING**", "**MIDDLE**", "**END**",
+                    "BEGINNING (Hook", "MIDDLE (Content", "END (Conclusion", "Hook - First", "Content - ", 
+                    "Conclusion - Final", "% of script)", "script):", "Script:", "for a", "-second video"
+                ]
+                
+                for phrase in unwanted_phrases:
+                    script = script.replace(phrase, "")
+                
+                # Remove lines that are just formatting or instructions
+                lines = script.split('\n')
+                cleaned_lines = []
+                for line in lines:
+                    line = line.strip()
+                    # Skip lines that are just formatting markers or empty
+                    if line and not line.startswith('*') and not line.startswith('#') and not line.startswith('🎬') and not line.startswith('📖') and not line.startswith('🎯'):
+                        # Remove quotes if the whole line is quoted
+                        if line.startswith('"') and line.endswith('"'):
+                            line = line[1:-1]
+                        cleaned_lines.append(line)
+                
+                script = ' '.join(cleaned_lines)
+                script = ' '.join(script.split())  # Clean up extra spaces
+                
+                # Remove any leading colons or quotes
+                if script.startswith(': "'):
+                    script = script[3:]
+                elif script.startswith(':"'):
+                    script = script[2:]
+                elif script.startswith('"'):
+                    script = script[1:]
+                elif script.startswith(':'):
+                    script = script[1:].strip()
+                
+                # Remove any trailing quote or percentage
+                if script.endswith('"%'):
+                    script = script[:-2]
+                elif script.endswith('%'):
+                    script = script[:-1]
+                elif script.endswith('"'):
+                    script = script[:-1]
+                
+                # Remove any trailing incomplete words or characters
+                script = script.rstrip(' .,;:!?%"\'()[]{}')
+                script = script.strip()
+                
                 logger.info(f"Generated script: {len(script.split())} words")
                 return script
             else:
@@ -212,24 +296,47 @@ Script:"""
         try:
             prompt = f"""For the video topic: {topic}
 
-Generate 3-5 search keywords that would find the best stock photos and videos for this content.
+Generate 4-6 search keywords that would find the best STOCK VIDEO CLIPS for this educational content.
 
 Requirements:
-- Focus on visual elements that support the topic
-- Use specific, searchable terms
-- Avoid abstract concepts
-- Prioritize concrete objects, places, or activities
+- Focus on DYNAMIC VISUAL ELEMENTS that support the topic
+- Prioritize ACTION SHOTS, DEMONSTRATIONS, and MOVING SCENES
+- Use specific, searchable terms for video content
+- Avoid static concepts - think movement, processes, activities
+- Include people working, technology in action, nature scenes, lab work, etc.
+- Prioritize concrete objects, places, or activities IN MOTION
 
-Return ONLY the search terms separated by spaces.
+Examples of good video search terms:
+- For AI topic: "robot arm working factory artificial intelligence scientists programming computers"
+- For space topic: "rocket launch astronauts space station earth orbit spacecraft"
+- For health topic: "doctors surgery medical equipment lab research microscope"
 
-Example: "artificial intelligence robot technology computer"
+Return ONLY the search terms separated by spaces. NO explanatory text or instructions.
+
 Search terms:"""
 
             search_query = self.generate_with_ollama(prompt, max_tokens=50)
             
             if search_query and len(search_query) > 5:
-                # Clean up the search query
+                # Clean up the search query - remove any instruction text that might leak through
+                search_query = search_query.strip()
+                
+                # Remove common instruction phrases that might appear
+                instruction_phrases = [
+                    "Here are", "search keyword", "stock video", "for the topic:",
+                    "Here's", "keyword phrases", "that match", "video clips"
+                ]
+                
+                for phrase in instruction_phrases:
+                    search_query = search_query.replace(phrase, "")
+                
+                # Clean up extra spaces and formatting
                 search_query = ' '.join(search_query.split())
+                
+                # Take only the actual search terms (usually after a colon)
+                if ':' in search_query:
+                    search_query = search_query.split(':', 1)[1].strip()
+                
                 logger.info(f"Generated search query: {search_query}")
                 return search_query
             else:
@@ -397,24 +504,32 @@ Requirements:
             
             # Language-specific instructions
             language_name = self._get_language_name(language)
-            language_instruction = f"Generate the topic in {language_name}." if language != "en-US" else ""
+            if language != "en-US":
+                language_instruction = f"IMPORTANT: Generate the topic title ENTIRELY in {language_name}. Do not mix languages."
+            else:
+                language_instruction = ""
             
             prompt_text = f"""Based on this idea or prompt: "{prompt}"
 
-Generate a complete, engaging video topic{context} that expands on this concept.
+Generate a complete, engaging video topic{context} that DIRECTLY expands on this specific concept.
 
-Requirements:
-- Build upon the original idea
+CRITICAL Requirements:
+- MUST be directly related to the original prompt/idea
+- Build upon the exact concept mentioned in the prompt
 - Make it specific and engaging
 - Suitable for a video format
 - Current and relevant
 - Educational or entertaining
 - {language_instruction}
+- NEVER change the main subject - expand it instead
 
 Return ONLY the complete topic title, nothing else.
 
 Example input: "quantum computers"
 Example output: "How Quantum Computers Will Change Everything in the Next 5 Years"
+
+Example input: "документальный фильм про менделеева"
+Example output: "Дмитрий Менделеев: Как создание периодической таблицы изменило химию навсегда"
 
 Topic:"""
 
